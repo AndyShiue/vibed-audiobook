@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0b0d12">
+  <meta name="color-scheme" content="dark">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="有聲書夥伴">
+  <title>有聲書夥伴</title>
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/icons/icon-192.png">
+  <link rel="stylesheet" href="/css/app.css">
+</head>
+<body>
+  <div id="toasts" role="status" aria-live="polite"></div>
+  <div id="liveStatus" class="sr-only" role="status" aria-live="assertive"></div>
+
+  <!-- ================= PLAYER ================= -->
+  <div id="player" class="screen" hidden>
+    <header class="topbar">
+      <button id="btnLibrary" class="icon-btn" aria-label="書櫃" data-i18n-aria="lib.aria">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h3v14H4zM9 5h3v14H9zM14.2 6.1l2.9-.8 3.5 13.5-2.9.8z"/></svg>
+      </button>
+      <button id="btnChapterPicker" class="titles picker" aria-label="選擇章節" aria-haspopup="dialog">
+        <span id="bookTitle" class="book-title">尚未選擇書籍</span>
+        <span id="chapterLine" class="chapter-line"></span>
+      </button>
+      <button id="btnSettings" class="icon-btn" aria-label="設定" data-i18n-aria="settings.title">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19.4 13a7.5 7.5 0 0 0 0-2l2-1.6-2-3.4-2.4 1a7.6 7.6 0 0 0-1.7-1L15 3.4h-4l-.4 2.6c-.6.3-1.2.6-1.7 1l-2.4-1-2 3.4 2 1.6a7.5 7.5 0 0 0 0 2l-2 1.6 2 3.4 2.4-1c.5.4 1.1.7 1.7 1l.4 2.6h4l.4-2.6c.6-.3 1.2-.6 1.7-1l2.4 1 2-3.4zM13 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z"/></svg>
+      </button>
+    </header>
+
+    <div id="banner" class="banner" hidden></div>
+
+    <div class="progress">
+      <input id="seek" type="range" min="0" max="1000" value="0" aria-label="閱讀進度" data-i18n-aria="progress.aria">
+      <div class="progress-text"><span id="pctText">0%</span><span id="leftText"></span></div>
+    </div>
+
+    <main class="stage">
+      <button id="askBtn" class="ask idle" aria-label="按一下向 AI 提問">
+        <span class="ask-rings" aria-hidden="true"><i></i><i></i><i></i></span>
+        <svg class="ask-icon" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M12 15.2a3.6 3.6 0 0 0 3.6-3.6V6.4a3.6 3.6 0 1 0-7.2 0v5.2a3.6 3.6 0 0 0 3.6 3.6z"/>
+          <path d="M6 11.4a.9.9 0 1 0-1.8 0 7.8 7.8 0 0 0 6.9 7.75V21.3a.9.9 0 1 0 1.8 0v-2.15A7.8 7.8 0 0 0 19.8 11.4a.9.9 0 1 0-1.8 0 6 6 0 0 1-12 0z"/>
+        </svg>
+        <span id="askLabel" class="ask-label">點一下提問</span>
+        <span id="askSub" class="ask-sub">問劇情，或聽不懂的句子</span>
+      </button>
+      <div id="caption" class="caption" tabindex="0" role="region" aria-label="目前的文字，可上下捲動" data-i18n-aria="caption.aria"><p id="captionText"></p></div>
+    </main>
+
+    <nav class="transport" aria-label="播放控制" data-i18n-aria="transport.aria">
+      <button id="btnBack" class="tbtn" aria-label="上一段（長按：上一章）" data-i18n-aria="back.aria">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6h2.4v12H6zM20 6v12L9.6 12z"/></svg>
+        <span data-i18n="back.label">上一段</span>
+      </button>
+      <button id="btnPlay" class="tbtn play" aria-label="播放">
+        <svg id="iconPlay" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.2v13.6L19 12z"/></svg>
+        <svg id="iconPause" viewBox="0 0 24 24" aria-hidden="true" hidden><path d="M7 5h3.6v14H7zM13.4 5H17v14h-3.6z"/></svg>
+        <span id="playLabel">播放</span>
+      </button>
+      <button id="btnFwd" class="tbtn" aria-label="下一段（長按：下一章）" data-i18n-aria="fwd.aria">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15.6 6H18v12h-2.4zM4 6l10.4 6L4 18z"/></svg>
+        <span data-i18n="fwd.label">下一段</span>
+      </button>
+    </nav>
+
+    <div class="chips">
+      <button id="chipSpeed" class="chip" aria-label="朗讀速度" data-i18n-aria="chip.speed.aria">1.0×</button>
+      <button id="chipSleep" class="chip" aria-label="睡眠計時" data-i18n-aria="chip.sleep.aria">睡眠 關</button>
+      <button id="chipText" class="chip" aria-label="顯示文字與問答紀錄" data-i18n-aria="chip.text.aria" data-i18n="chip.text">文字/問答</button>
+      <button id="chipType" class="chip" aria-label="用鍵盤輸入問題" data-i18n-aria="chip.type.aria" data-i18n="chip.type">⌨ 打字問</button>
+    </div>
+  </div>
+
+  <!-- ================= LIBRARY ================= -->
+  <div id="library" class="screen" hidden>
+    <header class="topbar">
+      <button id="btnCloseLibrary" class="icon-btn" aria-label="回到播放" data-i18n-aria="lib.back.aria">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15.4 5.6 14 4.2 6.2 12 14 19.8l1.4-1.4L9 12z"/></svg>
+      </button>
+      <div class="titles"><div class="book-title" data-i18n="lib.title">我的書櫃</div></div>
+      <button id="btnSettings2" class="icon-btn" aria-label="設定" data-i18n-aria="settings.title">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19.4 13a7.5 7.5 0 0 0 0-2l2-1.6-2-3.4-2.4 1a7.6 7.6 0 0 0-1.7-1L15 3.4h-4l-.4 2.6c-.6.3-1.2.6-1.7 1l-2.4-1-2 3.4 2 1.6a7.5 7.5 0 0 0 0 2l-2 1.6 2 3.4 2.4-1c.5.4 1.1.7 1.7 1l.4 2.6h4l.4-2.6c.6-.3 1.2-.6 1.7-1l2.4 1 2-3.4zM13 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z"/></svg>
+      </button>
+    </header>
+    <div class="library-body" id="dropZone">
+      <div class="add-row">
+        <label class="btn primary" for="fileInput" data-i18n="lib.add">＋ 加入書籍</label>
+        <input id="fileInput" type="file" multiple hidden>
+        <button id="btnPaste" class="btn" data-i18n="lib.paste">貼上文字</button>
+      </div>
+      <p class="hint" id="formatHint"></p>
+      <ul id="bookList" class="book-list"></ul>
+      <div id="emptyLibrary" class="empty" hidden>
+        <p data-i18n="lib.empty1">還沒有書。</p>
+        <p data-i18n="lib.empty2">選擇一個電子書或文件檔，或把檔案拖到這裡。文字會留在你的手機上，只有你提問時，「已經聽過的部分」才會送給 AI。</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= SHEETS ================= -->
+  <div id="sheetBackdrop" class="backdrop" hidden></div>
+
+  <section id="textSheet" class="sheet" hidden aria-label="文字" data-i18n-aria="sheet.text.aria">
+    <div class="sheet-head">
+      <div class="tabs" role="tablist">
+        <button id="tabText" class="tab on" role="tab" aria-selected="true" data-i18n="tab.text">書中文字</button>
+        <button id="tabQA" class="tab" role="tab" aria-selected="false" data-i18n="tab.qa">問答紀錄</button>
+      </div>
+      <button class="icon-btn close" data-close aria-label="關閉" data-i18n-aria="close">✕</button>
+    </div>
+    <div id="textBody" class="text-body"></div>
+    <div id="qaBody" class="text-body qa-body" hidden></div>
+  </section>
+
+  <section id="chapterSheet" class="sheet" hidden aria-label="章節" data-i18n-aria="chapters.title">
+    <div class="sheet-head"><h2 id="chapterSheetTitle">章節</h2><button class="icon-btn close" data-close aria-label="關閉" data-i18n-aria="close">✕</button></div>
+    <ol id="chapterList" class="chapter-list"></ol>
+  </section>
+
+  <section id="askSheet" class="sheet compact" hidden aria-label="輸入問題" data-i18n-aria="ask.sheet">
+    <div class="sheet-head"><h2 data-i18n="ask.sheet">輸入問題</h2><button class="icon-btn close" data-close aria-label="取消" data-i18n-aria="cancel">✕</button></div>
+    <form id="askForm" class="ask-form">
+      <textarea id="askText" rows="3" placeholder="例如：剛剛那句話是什麼意思？／他為什麼要這麼做？" data-i18n-ph="ask.placeholder" enterkeyhint="send"></textarea>
+      <button class="btn primary" type="submit" data-i18n="ask.submit">送出</button>
+    </form>
+  </section>
+
+  <section id="pasteSheet" class="sheet" hidden aria-label="貼上文字" data-i18n-aria="paste.title">
+    <div class="sheet-head"><h2 data-i18n="paste.title">貼上文字</h2><button class="icon-btn close" data-close aria-label="關閉" data-i18n-aria="close">✕</button></div>
+    <form id="pasteForm" class="ask-form">
+      <input id="pasteTitle" type="text" placeholder="標題（選填）" data-i18n-ph="paste.titlePh" autocomplete="off">
+      <textarea id="pasteText" rows="10" placeholder="把要聽的文章貼在這裡" data-i18n-ph="paste.textPh"></textarea>
+      <button class="btn primary" type="submit" data-i18n="paste.submit">加入書櫃</button>
+    </form>
+  </section>
+
+  <section id="settingsSheet" class="sheet" hidden aria-label="設定" data-i18n-aria="settings.title">
+    <div class="sheet-head"><h2 data-i18n="settings.title">設定</h2><button class="icon-btn close" data-close aria-label="關閉" data-i18n-aria="close">✕</button></div>
+    <div class="settings">
+      <label class="row"><span data-i18n="set.language">介面語言 / Language / 言語</span>
+        <select id="setUiLang">
+          <option value="zh">中文</option>
+          <option value="en">English</option>
+          <option value="ja">日本語</option>
+        </select></label>
+      <label class="row"><span><span data-i18n="set.rate">朗讀速度</span> <b id="rateVal">1.0×</b></span>
+        <input id="setRate" type="range" min="0.6" max="2" step="0.05"></label>
+      <label class="row"><span data-i18n="set.voice">朗讀聲音</span><select id="setVoice"></select></label>
+      <label class="row"><span data-i18n="set.answerVoice">AI 回答的聲音（依提問語言）</span><select id="setAnswerVoice"></select></label>
+      <div class="row buttons"><button id="btnTestVoice" class="btn small" data-i18n="set.testVoice">試聽朗讀</button><button id="btnTestAnswer" class="btn small" data-i18n="set.testAnswer">試聽回答</button></div>
+      <div class="section-title" data-i18n="set.sec.voice">語音提問</div>
+      <label class="row"><span data-i18n="set.sttMode">辨識方式</span>
+        <select id="setSttMode">
+          <option value="auto" data-i18n="set.sttMode.auto">自動（設定好雲端就用雲端）</option>
+          <option value="cloud" data-i18n="set.sttMode.cloud">雲端辨識（整段錄音上傳，可中英夾雜）</option>
+          <option value="device" data-i18n="set.sttMode.device">手機內建辨識（一次只能一種語言）</option>
+        </select></label>
+      <div class="row info" id="sttInfo"></div>
+      <label class="row"><span data-i18n="set.cloudLang">雲端辨識的語言</span>
+        <select id="setCloudLang">
+          <option value="auto" data-i18n="set.cloudLang.auto">自動偵測（建議，可混合多種語言）</option>
+          <option value="zh">中文</option>
+          <option value="en">English</option>
+          <option value="ja">日本語</option>
+          <option value="ko">한국어</option>
+        </select></label>
+      <label class="row check"><input id="setSttHint" type="checkbox"><span data-i18n="set.sttHint">把目前位置附近的書中文字一併傳給辨識服務（可提高人名準確度，但可能讓英文提問被誤認成書中文字；一般不建議開，AI 回答時本來就會依劇情修正聽錯的人名）</span></label>
+      <label class="row"><span data-i18n="set.askLang">手機內建辨識的語言（只有「手機內建辨識」用得到）</span>
+        <select id="setAskLang">
+          <option value="auto" data-i18n="set.askLang.auto">跟隨手機語言</option>
+          <option value="book" data-i18n="set.askLang.book">跟隨書本語言</option>
+          <option value="zh-TW">中文（台灣）</option>
+          <option value="zh-CN">中文（简体）</option>
+          <option value="en-US">English</option>
+          <option value="ja-JP">日本語</option>
+          <option value="ko-KR">한국어</option>
+        </select></label>
+      <label class="row check"><input id="setWake" type="checkbox"><span data-i18n="set.wake">播放時保持螢幕亮著（鎖屏後手機通常會停止朗讀）</span></label>
+      <label class="row check"><input id="setEarcons" type="checkbox"><span data-i18n="set.earcons">提示音</span></label>
+      <label class="row check"><input id="setHaptics" type="checkbox"><span data-i18n="set.haptics">震動回饋</span></label>
+      <label class="row check"><input id="setTitle" type="checkbox"><span data-i18n="set.sendTitle">讓 AI 知道書名與作者（回答較準，但 AI 可能記得後面的劇情）</span></label>
+      <div class="section-title" data-i18n="set.sec.gesture">手勢</div>
+      <label class="row check"><input id="setShake" type="checkbox"><span data-i18n="set.shake">搖晃手機來開始提問（預設關閉）。相當於點一下大按鈕；需要螢幕亮著。</span></label>
+      <label class="row" id="shakeSensRow" hidden><span data-i18n="set.shakeSens">搖晃靈敏度</span>
+        <select id="setShakeSens">
+          <option value="low" data-i18n="shake.low">低（要用力搖，最不會誤觸）</option>
+          <option value="normal" data-i18n="shake.normal">中</option>
+          <option value="high" data-i18n="shake.high">高（輕搖就觸發，走路或慢跑時可能誤觸）</option>
+        </select></label>
+      <div class="row info" id="shakeInfo" hidden></div>
+      <div class="section-title" data-i18n="set.sec.advanced">進階</div>
+      <label class="row" id="tokenRow"><span data-i18n="set.token">存取密碼（伺服器有設定時才需要）</span><input id="setToken" type="password" autocomplete="off"></label>
+      <div class="row info" id="aiInfo"></div>
+      <div class="row info" id="memInfo"></div>
+      <div class="row buttons">
+        <button id="btnChapters" class="btn small" data-i18n="set.chapters">章節列表</button>
+        <button id="btnClearMemory" class="btn small danger" data-i18n="set.clearMemory">清除此書的 AI 記憶</button>
+        <button id="btnRestart" class="btn small danger" data-i18n="set.restart">從頭開始</button>
+      </div>
+    </div>
+  </section>
+
+  <div id="importOverlay" class="overlay" hidden>
+    <div class="import-card">
+      <div id="importMsg" data-i18n="import.working">處理中…</div>
+      <div class="bar"><i id="importBar"></i></div>
+    </div>
+  </div>
+
+  <script type="module" src="/js/app.js"></script>
+</body>
+</html>

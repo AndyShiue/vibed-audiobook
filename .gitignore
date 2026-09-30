@@ -1,0 +1,7 @@
+node_modules/
+.env
+.certs/
+*.log
+.DS_Store
+# copied from node_modules by "npm install" (scripts/vendor.js)
+public/vendor/

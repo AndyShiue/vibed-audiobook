@@ -1,0 +1,12 @@
+# Line endings that must not be changed by git (or by a Windows/macOS checkout):
+#   .bat needs CRLF; a shell script with CRLF fails with "bad interpreter" on macOS/Linux.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.sh text eol=lf
+*.command text eol=lf
+* text=auto
+
+# Sample books in many formats and encodings (Big5, RTF, PDF, zipped office files…): never rewrite a byte.
+fixtures/** -text
+*.png binary
+*.ico binary

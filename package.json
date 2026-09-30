@@ -1,0 +1,26 @@
+{
+  "name": "audiobook-companion",
+  "version": "1.0.0",
+  "description": "Hands-free mobile audiobook player with a spoiler-safe AI reading companion",
+  "type": "module",
+  "private": true,
+  "license": "CC0-1.0",
+  "engines": {
+    "node": ">=20.12"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "start:mock": "node server.js --mock",
+    "start:https": "node server.js --https",
+    "start:lan": "node server.js --https",
+    "test": "node --test test/*.test.js",
+    "postinstall": "node scripts/vendor.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.129.0",
+    "jszip": "^3.10.1",
+    "mammoth": "^1.8.0",
+    "node-forge": "^1.3.1",
+    "pdfjs-dist": "^4.10.38"
+  }
+}
