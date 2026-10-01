@@ -55,12 +55,28 @@ export async function listBooks() {
     .sort((a, b) => (b.lastOpened || 0) - (a.lastOpened || 0));
 }
 
+const sizeOf = (data) => ({ total: data.sents.length, chapters: data.chapters.length, chars: data.sents.reduce((t, s) => t + s.length, 0) });
+
 export async function saveBook(id, data, kind) {
-  const meta = {
-    id, title: data.title, author: data.author, lang: data.lang, total: data.sents.length,
-    chapters: data.chapters.length, chars: data.sents.reduce((t, s) => t + s.length, 0), kind, addedAt: Date.now(), lastOpened: Date.now(),
-  };
-  await tx(['books', 'content'], 'readwrite', (b, c) => Promise.all([wrap(b.put(meta)), wrap(c.put({ id, sents: data.sents, paraStart: data.paraStart, chapters: data.chapters }))]));
+  const meta = { id, title: data.title, author: data.author, lang: data.lang, ...sizeOf(data), seg: data.seg, kind, addedAt: Date.now(), lastOpened: Date.now() };
+  await tx(['books', 'content'], 'readwrite', (b, c) => Promise.all([wrap(b.put(meta)), wrap(c.put({ id, sents: data.sents, paraStart: data.paraStart, chapters: data.chapters, seg: data.seg }))]));
+  return meta;
+}
+
+/**
+ * A book cut again with newer sentence rules: replaces its units and moves the reading position and the Q&A log over.
+ * The AI's notes are tied to the old units, so they are dropped (they are rebuilt as the listener goes on).
+ */
+export async function upgradeBook(id, data, { idx, qa }) {
+  const old = await store.get('books', id);
+  const meta = { ...old, ...sizeOf(data), seg: data.seg };
+  await tx(['books', 'content', 'progress', 'memory', 'qa'], 'readwrite', (b, c, p, m, q) => Promise.all([
+    wrap(b.put(meta)),
+    wrap(c.put({ id, sents: data.sents, paraStart: data.paraStart, chapters: data.chapters, seg: data.seg })),
+    wrap(p.put({ id, idx, updatedAt: Date.now() })),
+    wrap(m.delete(id)),
+    wrap(q.put({ id, items: qa.slice(-40) })),
+  ]));
   return meta;
 }
 
@@ -91,8 +107,8 @@ export const clearMemory = async (id) => { await store.del('memory', id); await 
 // ---- settings (small, synchronous, localStorage)
 const SETTINGS_KEY = 'audiobook-settings-v1';
 export const DEFAULT_SETTINGS = {
-  v: 2,
-  uiLang: 'zh',          // interface language: 'zh' (default) | 'en' | 'ja'
+  v: 3,
+  uiLang: 'auto',        // interface language: 'auto' = follow the phone (default) | 'zh' | 'en' | 'ja' once chosen by hand
   rate: 1.0,
   voiceURI: {},          // per language: {'zh-TW': 'voiceURI'}
   answerVoiceURI: {},
@@ -115,6 +131,10 @@ export function loadSettings() {
     const stored = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}');
     // v2: the book-text hint used to default to on; it turned out to derail English questions, so switch it off once.
     if ((stored.v || 1) < 2) { stored.sttHint = false; stored.v = 2; }
+    // v3: the interface language follows the phone by default. Earlier builds saved 'zh' as the default together with any
+    // other setting, so a stored 'zh' cannot be told from a choice and goes back to following the phone; a stored 'en' or
+    // 'ja' was always chosen by hand and stays. From v3 on, whatever is stored is the listener's own choice.
+    if ((stored.v || 1) < 3) { if (stored.uiLang === 'zh') delete stored.uiLang; stored.v = 3; }
     return { ...DEFAULT_SETTINGS, ...stored };
   } catch { return { ...DEFAULT_SETTINGS }; }
 }

@@ -4,7 +4,7 @@ const CACHE = 'audiobook-v1';
 const SHELL = [
   '/', '/index.html', '/manifest.webmanifest', '/css/app.css',
   '/icons/icon.svg', '/icons/icon-192.png', '/icons/icon-512.png',
-  '/js/app.js', '/js/ai.js', '/js/book.js', '/js/commands.js', '/js/context.js', '/js/feedback.js', '/js/i18n.js', '/js/lang.js', '/js/library.js', '/js/memory.js',
+  '/js/abbreviations.js', '/js/app.js', '/js/ai.js', '/js/book.js', '/js/commands.js', '/js/context.js', '/js/feedback.js', '/js/i18n.js', '/js/lang.js', '/js/library.js', '/js/memory.js',
   '/js/recorder.js', '/js/retrieval.js', '/js/segmenter.js', '/js/session.js', '/js/shake.js', '/js/stt.js', '/js/tts.js', '/js/util.js',
   '/js/parsers/common.js', '/js/parsers/epub.js', '/js/parsers/index.js', '/js/parsers/pdf.js', '/js/parsers/text.js',
   '/vendor/jszip.min.js', '/vendor/mammoth.browser.min.js', '/vendor/pdfjs/pdf.min.mjs', '/vendor/pdfjs/pdf.worker.min.mjs',

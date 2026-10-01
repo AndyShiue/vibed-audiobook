@@ -1,6 +1,7 @@
 // The plain-HTTP page that hands out the personal certificate authority (see lan-cert.js).
 // A phone opens it before it has ever seen the app, so the language comes from the browser's Accept-Language header
 // (or ?lang=), not from the app's settings.
+import { detectLang, FALLBACK_LANG } from './public/js/i18n.js';
 
 const PAGES = {
   zh: {
@@ -32,19 +33,21 @@ const PAGES = {
   },
 };
 
-/** Best supported language for an Accept-Language header (e.g. "ja,en;q=0.8"); `override` (?lang=) wins. */
+/**
+ * The language for an Accept-Language header (e.g. "ja,en;q=0.8"), chosen the same way as the app's interface language
+ * (i18n.js): the first language by preference that we have, else English. `override` (?lang=) wins.
+ */
 export function pickSetupLang(acceptLanguage = '', override = '') {
   if (PAGES[override]) return override;
-  const wanted = String(acceptLanguage).split(',').map((part) => {
+  const tags = String(acceptLanguage).split(',').map((part) => {
     const [tag, q] = part.trim().split(';q=');
-    return { code: tag.toLowerCase().split('-')[0], q: q === undefined ? 1 : Number(q) || 0 };
-  }).sort((a, b) => b.q - a.q);
-  for (const w of wanted) if (PAGES[w.code]) return w.code;
-  return 'zh';
+    return { tag, q: q === undefined ? 1 : Number(q) || 0 };
+  }).filter((w) => w.q > 0).sort((a, b) => b.q - a.q).map((w) => w.tag);
+  return detectLang(tags); // always an explicit list: on the server there is no phone to ask
 }
 
-export function setupPage({ httpsUrl, lang = 'zh' }) {
-  const p = PAGES[lang] || PAGES.zh;
+export function setupPage({ httpsUrl, lang = FALLBACK_LANG }) {
+  const p = PAGES[lang] || PAGES[FALLBACK_LANG];
   const list = (items) => `<ol>${items.map((i) => `<li>${i}</li>`).join('')}</ol>`;
   return `<!doctype html><html lang="${p.html}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${p.title}</title>

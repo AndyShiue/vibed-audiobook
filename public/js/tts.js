@@ -9,7 +9,7 @@
 //  • A watchdog moves on if an engine never fires `end` (a well-known Chrome failure mode).
 import { detectSpokenLang, normalizeTag } from './lang.js';
 import { sleep, cjkRatio } from './util.js';
-import { breakLong } from './segmenter.js';
+import { breakLong, scanSentences } from './segmenter.js';
 
 const getSynth = () => globalThis.speechSynthesis || null;
 export const ttsSupported = () => !!getSynth() && typeof SpeechSynthesisUtterance !== 'undefined';
@@ -92,58 +92,44 @@ export function cleanForSpeech(text) {
 
 const cleanMarkdown = (s) => cleanForSpeech(s.replace(/^\s*(?:[-*+•]|\d+[.)])\s+/gm, '').replace(/^\s*>+\s*/gm, '').replace(/\[([^\]]+)]\([^)]*\)/g, '$1'));
 
-/** Splits a streamed answer into speakable sentences as soon as they are complete. */
+/**
+ * Splits a streamed answer into speakable sentences as soon as they are complete. The same sentence rules as for the
+ * book are used (segmenter.js), so "Dr. Chen", « French quotations », "he said" after a quote and the full stops of
+ * Arabic, Hindi, Thai-script and other languages are all handled; a sentence is released once the character after its
+ * full stop has arrived, because that character decides whether it really ended there.
+ */
 export class SentenceStream {
-  constructor() { this.buf = ''; this.count = 0; }
+  constructor(lang = '') { this.buf = ''; this.count = 0; this.lang = lang; }
 
   push(delta) { this.buf += delta; return this.drain(false); }
   end() { return this.drain(true); }
 
-  cutIndex(final) {
-    const b = this.buf;
-    for (let i = 0; i < b.length; i++) {
-      const c = b[i];
-      let end = false;
-      if ('。！？!?；;\n'.includes(c)) end = true;
-      else if (c === '.' && (i + 1 < b.length ? /\s/.test(b[i + 1]) : final)) end = true;
-      if (end) {
-        let j = i + 1;
-        while (j < b.length && '」』”’）)"\'。！？!?'.includes(b[j])) j++;
-        if (j === b.length && !final && c !== '\n' && /[」』”’）)"']/.test(b[j - 1] || '')) return -1;
-        return j;
-      }
-    }
-    if (!final && this.count === 0 && b.length >= 14) { // start talking early: first clause is enough
-      const m = Math.max(b.lastIndexOf('，'), b.lastIndexOf('、'), b.lastIndexOf(','), b.lastIndexOf('：'), b.lastIndexOf(':'));
-      if (m >= 8) return m + 1;
-    }
-    if (b.length > 140) {
-      const sp = Math.max(b.lastIndexOf(' ', 120), b.lastIndexOf('，', 120), b.lastIndexOf(',', 120));
-      return sp > 40 ? sp + 1 : 120;
-    }
-    return -1;
-  }
-
   drain(final) {
     const out = [];
     // Long sentences are cut at commas: some engines (notably Chrome's online voices) stop after ~15 s of one utterance.
-    const emit = (t) => {
+    const emit = (raw) => {
+      const t = cleanMarkdown(raw);
       if (!t) return;
       const cjk = cjkRatio(t) > 0.3;
       const max = cjk ? 60 : 170;
-      for (const part of t.length > max ? breakLong(t, max, cjk) : [t]) { out.push(part); this.count++; }
+      for (const part of t.length > max ? breakLong(t, max, { lang: this.lang }) : [t]) { out.push(part); this.count++; }
     };
-    for (;;) {
-      const cut = this.cutIndex(final);
-      if (cut < 0) break;
-      const t = cleanMarkdown(this.buf.slice(0, cut));
-      this.buf = this.buf.slice(cut);
-      emit(t);
-    }
-    if (final) {
-      const t = cleanMarkdown(this.buf);
-      this.buf = '';
-      emit(t);
+    const { sentences, rest } = scanSentences(this.buf, { final, newlineEnds: true, lang: this.lang });
+    this.buf = rest;
+    for (const sentence of sentences) emit(sentence);
+    if (!final) {
+      if (this.count === 0 && this.buf.length >= 14) { // start talking early: the first clause is enough
+        const b = this.buf;
+        const m = Math.max(b.lastIndexOf('，'), b.lastIndexOf('、'), b.lastIndexOf(','), b.lastIndexOf('：'), b.lastIndexOf(':'));
+        if (m >= 8) { this.buf = b.slice(m + 1); emit(b.slice(0, m + 1)); }
+      }
+      while (this.buf.length > 140) { // a sentence that never ends: cut it at a space or comma
+        const b = this.buf;
+        const sp = Math.max(b.lastIndexOf(' ', 120), b.lastIndexOf('，', 120), b.lastIndexOf(',', 120));
+        const cut = sp > 40 ? sp + 1 : 120;
+        this.buf = b.slice(cut);
+        emit(b.slice(0, cut));
+      }
     }
     return out;
   }

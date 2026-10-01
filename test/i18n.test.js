@@ -6,7 +6,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { STRINGS, LANGS, t, tIn, setLang, getLang, isLang } from '../public/js/i18n.js';
+import { STRINGS, LANGS, t, tIn, setLang, getLang, isLang, detectLang, resolveLang, FALLBACK_LANG, LANG_AUTO } from '../public/js/i18n.js';
+import { loadSettings, saveSettings, DEFAULT_SETTINGS } from '../public/js/library.js';
 
 const PUBLIC = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'public');
 const read = (p) => fs.readFileSync(path.join(PUBLIC, p), 'utf8');
@@ -15,11 +16,97 @@ const HAN = /[一-鿿]/;
 
 test.afterEach(() => setLang('zh'));
 
-test('Chinese is the default; English and Japanese are offered', () => {
-  assert.equal(getLang(), 'zh');
+test('Chinese, English and Japanese are offered; anything else falls back to English', () => {
   assert.deepEqual(LANGS.map((l) => l.code), ['zh', 'en', 'ja']);
-  assert.ok(isLang('ja') && isLang('en') && !isLang('fr'));
-  assert.equal(setLang('fr'), 'zh', 'an unknown language falls back to Chinese');
+  assert.ok(isLang('ja') && isLang('en') && isLang('zh') && !isLang('fr') && !isLang('auto') && !isLang('constructor') && !isLang('__proto__'));
+  assert.equal(FALLBACK_LANG, 'en');
+  assert.equal(setLang('fr'), 'en', 'an unknown language falls back to English');
+  assert.equal(setLang('zh'), 'zh');
+});
+
+test('the interface language follows the phone: its first language that we have wins', () => {
+  assert.equal(detectLang(['ja-JP', 'en-US']), 'ja');
+  assert.equal(detectLang(['en-GB', 'ja']), 'en');
+  assert.equal(detectLang(['zh-TW']), 'zh');
+  assert.equal(detectLang(['zh-Hant-HK', 'en']), 'zh');
+  assert.equal(detectLang(['zh-CN']), 'zh', 'Simplified-Chinese phones get the Chinese we have');
+  assert.equal(detectLang(['yue-HK']), 'zh', 'Cantonese and other names for Chinese');
+  assert.equal(detectLang(['fr-FR', 'de', 'ja-JP']), 'ja', 'languages we lack are skipped in favour of the next one');
+  assert.equal(detectLang(['fr-FR', 'de-DE', 'ko-KR']), 'en', 'none of ours: English');
+  assert.equal(detectLang([]), 'en');
+  assert.equal(detectLang(['', undefined, null, 42, 'EN_us']), 'en', 'junk entries and underscores are tolerated');
+  assert.equal(detectLang(['JA-jp']), 'ja', 'case does not matter');
+  assert.equal(detectLang(['constructor', '__proto__', 'toString']), 'en', 'language codes are never looked up as object properties');
+});
+
+test('a language chosen by hand is kept; "auto" and anything unknown follow the phone', () => {
+  assert.equal(LANG_AUTO, 'auto');
+  assert.equal(resolveLang('auto', ['ja-JP']), 'ja');
+  assert.equal(resolveLang('zh', ['ja-JP']), 'zh', "the listener's own choice wins over the phone");
+  assert.equal(resolveLang('en', ['ja-JP']), 'en');
+  assert.equal(resolveLang('ja', ['en-US']), 'ja');
+  assert.equal(resolveLang(undefined, ['ja-JP']), 'ja', 'no setting yet');
+  assert.equal(resolveLang('klingon', ['ja-JP']), 'ja', 'a damaged setting does not break the app');
+  assert.equal(resolveLang('auto', ['fr']), 'en');
+});
+
+test("the browser's own language list is used when none is given", () => {
+  const saved = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+  try {
+    for (const [languages, expected] of [[['ja-JP', 'en'], 'ja'], [['fr-FR', 'zh-TW'], 'zh'], [[], 'en']]) {
+      Object.defineProperty(globalThis, 'navigator', { value: { languages, language: languages[0] }, configurable: true });
+      assert.equal(detectLang(), expected, JSON.stringify(languages));
+    }
+    Object.defineProperty(globalThis, 'navigator', { value: { language: 'ja' }, configurable: true }); // older browsers have no languages list
+    assert.equal(detectLang(), 'ja');
+    Object.defineProperty(globalThis, 'navigator', { value: undefined, configurable: true });
+    assert.equal(detectLang(), 'en', 'no browser at all');
+  } finally {
+    if (saved) Object.defineProperty(globalThis, 'navigator', saved); else delete globalThis.navigator;
+  }
+});
+
+// ---------------------------------------------------------------- the stored setting
+function withStorage(initial, fn) {
+  const raw = initial === undefined ? [] : [['audiobook-settings-v1', typeof initial === 'string' ? initial : JSON.stringify(initial)]];
+  const data = new Map(raw);
+  const saved = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+  Object.defineProperty(globalThis, 'localStorage', { value: { getItem: (k) => data.get(k) ?? null, setItem: (k, v) => { data.set(k, String(v)); } }, configurable: true });
+  try { return fn(data); } finally {
+    if (saved) Object.defineProperty(globalThis, 'localStorage', saved); else delete globalThis.localStorage;
+  }
+}
+
+test('a new listener starts with "follow the phone"; a language they pick is stored and stays', () => {
+  assert.equal(DEFAULT_SETTINGS.uiLang, 'auto');
+  withStorage(undefined, () => {
+    const s = loadSettings();
+    assert.equal(s.uiLang, 'auto');
+    s.uiLang = 'ja'; // the listener picks Japanese in Settings
+    saveSettings(s);
+    const again = loadSettings();
+    assert.equal(again.uiLang, 'ja', 'the choice survives a restart');
+    again.uiLang = 'zh';
+    saveSettings(again);
+    assert.equal(loadSettings().uiLang, 'zh', 'and "Chinese" is kept as a choice from now on, whatever the phone says');
+    again.uiLang = 'auto';
+    saveSettings(again);
+    assert.equal(loadSettings().uiLang, 'auto', 'going back to automatic is a choice too');
+  });
+});
+
+test('settings saved by earlier versions: a stored "zh" was only the old default, "en" and "ja" were choices', () => {
+  withStorage({ v: 2, uiLang: 'zh', rate: 1.4, shake: true }, () => {
+    const s = loadSettings();
+    assert.equal(s.uiLang, 'auto', 'the old default now follows the phone');
+    assert.equal(s.rate, 1.4);
+    assert.equal(s.shake, true, 'nothing else is touched');
+  });
+  withStorage({ v: 2, uiLang: 'ja' }, () => assert.equal(loadSettings().uiLang, 'ja'));
+  withStorage({ v: 2, uiLang: 'en' }, () => assert.equal(loadSettings().uiLang, 'en'));
+  withStorage({ rate: 1.2 }, () => assert.equal(loadSettings().uiLang, 'auto'));
+  withStorage({ v: 3, uiLang: 'zh' }, () => assert.equal(loadSettings().uiLang, 'zh', 'from v3 on a stored language is always a choice'));
+  withStorage('{not json', () => assert.equal(loadSettings().uiLang, 'auto'));
 });
 
 test('all three languages define exactly the same keys', () => {
@@ -133,9 +220,13 @@ test('user-visible Chinese is not hard-coded in modules that should use t()', ()
   read('js/parsers/pdf.js').split('\n').forEach((line, i) => { if (HAN.test(line) && !/PAGE_NUMBER|^\s*(\/\/|\*)/.test(line)) assert.fail(`pdf.js:${i + 1} hard-codes Chinese: ${line.trim()}`); });
 });
 
-test('the settings screen offers the three languages and the app starts in Chinese', () => {
+test('the settings screen offers "follow the phone" and the three languages; the app starts by following the phone', () => {
   const html = read('index.html');
-  assert.match(html, /<select id="setUiLang">[\s\S]*?value="zh">中文[\s\S]*?value="en">English[\s\S]*?value="ja">日本語/);
-  assert.match(read('js/library.js'), /uiLang: 'zh'/);
-  assert.match(read('js/app.js'), /setLang\(S\.settings\.uiLang\);\s*applyI18n\(\);/);
+  assert.match(html, /<select id="setUiLang">\s*<option value="auto" data-i18n="set\.language\.auto">[\s\S]*?value="zh">中文[\s\S]*?value="en">English[\s\S]*?value="ja">日本語/);
+  assert.match(read('js/library.js'), /uiLang: 'auto'/);
+  const app = read('js/app.js');
+  assert.match(app, /setLang\(resolveLang\(S\.settings\.uiLang\)\);\s*applyI18n\(\);/, 'the language is resolved at startup');
+  assert.match(app, /function changeUiLang\(\) \{[\s\S]*?setLang\(resolveLang\(S\.settings\.uiLang\)\)/, 'and again whenever the setting changes');
+  assert.match(app, /addEventListener\('languagechange'/, "and when the phone's language changes while the app is open");
+  assert.match(app, /\$\('setUiLang'\)\.addEventListener\('change', \(e\) => \{ s\.uiLang = e\.target\.value; save\(\);/, 'a language picked by hand is saved at once');
 });

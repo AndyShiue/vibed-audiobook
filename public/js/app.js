@@ -2,7 +2,8 @@
 //   library / import  →  Book  →  Narrator (TTS)  ⇄  ask flow (STT → context builder → AI → spoken answer → resume)
 import * as lib from './library.js';
 import * as ai from './ai.js';
-import { Book, buildBookData } from './book.js';
+import { Book, buildBookData, resegmentBook } from './book.js';
+import { SEG_VERSION } from './segmenter.js';
 import { parseBookFile, parsePastedText, ACCEPT } from './parsers/index.js';
 import { Narrator, AnswerSpeaker, SentenceStream, loadVoices, voicesFor, pickVoice, ttsSupported, cleanForSpeech } from './tts.js';
 import { Listener, sttSupported } from './stt.js';
@@ -15,8 +16,8 @@ import { RetrievalIndex } from './retrieval.js';
 import { buildAskContext } from './context.js';
 import { planCommands } from './commands.js';
 import { normalizeTag, detectSpokenLang } from './lang.js';
-import { sleep } from './util.js';
-import { t, tIn, setLang, applyI18n } from './i18n.js';
+import { sleep, gapBetween } from './util.js';
+import { t, tIn, setLang, applyI18n, isLang, resolveLang, LANG_AUTO } from './i18n.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -234,9 +235,25 @@ function renderAll() {
 }
 
 // ------------------------------------------------------------------ opening a book
+/** A book imported with older sentence rules is cut again, keeping the listener's place (see resegmentBook). */
+async function upgradeSegmentation(rec) {
+  try {
+    const { data, mapIndex } = resegmentBook(rec);
+    const idx = mapIndex(await lib.getProgress(rec.id));
+    const qa = (await lib.getQA(rec.id)).map((item) => ({ ...item, pos: mapIndex(item.pos) }));
+    await lib.upgradeBook(rec.id, data, { idx, qa });
+    toast(t('book.resegmented'), '', 7000);
+    return { ...rec, ...data };
+  } catch (err) {
+    console.error('[segmentation] could not re-cut the book; keeping the old cuts', err);
+    return rec;
+  }
+}
+
 async function openBook(id) {
-  const rec = await lib.loadBookRecord(id);
+  let rec = await lib.loadBookRecord(id);
   if (!rec) { toast(t('book.missing'), 'error'); return; }
+  if ((rec.seg ?? 1) < SEG_VERSION) rec = await upgradeSegmentation(rec);
   saveProgressNow(); saveMemoryNow();
   cancelAsk({ resume: false, silent: true });
   narrator.hardStop();
@@ -890,7 +907,7 @@ function renderTextSheet() {
     if (k > from && b.isParaStart[k]) { body.appendChild(p); p = document.createElement('p'); }
     const sp = document.createElement('span');
     sp.dataset.i = String(k);
-    sp.textContent = b.sents[k] + (b.cjk ? '' : ' ');
+    sp.textContent = b.sents[k] + (k + 1 < b.length ? gapBetween(b.sents[k], b.sents[k + 1]) : '');
     if (k === i) sp.className = 'now'; else if (k < i) sp.className = 'past';
     p.appendChild(sp);
   }
@@ -1010,7 +1027,7 @@ function renderSttInfo() {
 
 function openSettings() {
   const s = S.settings;
-  $('setUiLang').value = s.uiLang;
+  $('setUiLang').value = isLang(s.uiLang) ? s.uiLang : LANG_AUTO;
   $('setRate').value = s.rate; $('rateVal').textContent = `${s.rate.toFixed(2).replace(/0$/, '')}×`;
   const bookLang = S.book?.lang || normalizeTag(navigator.language) || 'zh-TW';
   fillVoiceSelect($('setVoice'), bookLang, s.voiceURI[bookLang]);
@@ -1030,9 +1047,12 @@ function openSettings() {
 
 const previewLang = (lang) => (/^zh/.test(lang) ? 'zh' : /^ja/.test(lang) ? 'ja' : 'en');
 
-/** Switch the interface language: static text, dynamic text, and whatever screen or sheet is open. */
+/**
+ * Switch the interface language: static text, dynamic text, and whatever screen or sheet is open. The setting is a language
+ * the listener chose by hand (kept as chosen) or 'auto', which follows the phone's language list.
+ */
 function changeUiLang() {
-  setLang(S.settings.uiLang);
+  setLang(resolveLang(S.settings.uiLang));
   applyI18n();
   renderAll();
   updateMediaMetadata();
@@ -1201,9 +1221,11 @@ function bindUI() {
 }
 
 async function init() {
-  setLang(S.settings.uiLang);
+  setLang(resolveLang(S.settings.uiLang));
   applyI18n();
   bindUI();
+  // the phone's language was changed while the app is open: follow it, unless a language was chosen by hand
+  window.addEventListener('languagechange', () => { if (!isLang(S.settings.uiLang)) changeUiLang(); });
   ai.setAccessToken(S.settings.accessToken);
   loadVoices().then(() => { if (openSheetId === 'settingsSheet') openSettings(); });
   S.config = await ai.getConfig();

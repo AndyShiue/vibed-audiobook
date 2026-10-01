@@ -45,6 +45,20 @@ export function bsearchLE(arr, x) {
   return ans;
 }
 
+/**
+ * Scripts written WITHOUT spaces between words or sentences: Han, kana, Bopomofo, CJK symbols/punctuation and fullwidth
+ * forms. (Hangul is not among them — Korean puts spaces between words, and between sentences.)
+ */
+export const isClosedScript = (c) =>
+  (c >= 0x2e80 && c <= 0x312f) || (c >= 0x31a0 && c <= 0x4dbf) || (c >= 0x4e00 && c <= 0x9fff) || (c >= 0xf900 && c <= 0xfaff) ||
+  (c >= 0xfe30 && c <= 0xfe6f) || (c >= 0xff00 && c <= 0xffef) || (c >= 0x20000 && c <= 0x2fa1f);
+
+const lastCodePoint = (s) => [...s.slice(-2)].pop().codePointAt(0);
+
+/** What goes between two pieces of text that follow each other: nothing next to Chinese/Japanese, a space otherwise. */
+export const gapBetween = (a, b) => (!a || !b || isClosedScript(lastCodePoint(a)) || isClosedScript(b.codePointAt(0)) ? '' : ' ');
+export const joinText = (a, b) => a + gapBetween(a, b) + b;
+
 /** Collapse whitespace, drop control/zero-width characters, and remove spaces between CJK characters. */
 export function normalizeText(s) {
   return String(s ?? '')

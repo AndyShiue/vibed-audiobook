@@ -3,12 +3,15 @@ import assert from 'node:assert/strict';
 import { setupPage, pickSetupLang } from '../setup-page.js';
 
 test('the certificate page follows the phone\'s language preference', () => {
-  assert.equal(pickSetupLang(''), 'zh', 'no header → Chinese, the default');
+  assert.equal(pickSetupLang(''), 'en', 'no header → English, the fallback');
   assert.equal(pickSetupLang('zh-TW,zh;q=0.9,en;q=0.8'), 'zh');
   assert.equal(pickSetupLang('en-US,en;q=0.9'), 'en');
   assert.equal(pickSetupLang('ja-JP,ja;q=0.9,en-US;q=0.6'), 'ja');
   assert.equal(pickSetupLang('fr-FR,fr;q=0.9,ja;q=0.5'), 'ja', 'first supported language by preference');
-  assert.equal(pickSetupLang('fr-FR,de;q=0.8'), 'zh', 'nothing supported → default');
+  assert.equal(pickSetupLang('fr-FR,de;q=0.8'), 'en', 'nothing supported → English');
+  assert.equal(pickSetupLang('yue-HK,en;q=0.5'), 'zh', 'other names for Chinese');
+  assert.equal(pickSetupLang('ja;q=0,en;q=0.4'), 'en', 'q=0 means "not acceptable"');
+  assert.equal(pickSetupLang('*'), 'en');
   assert.equal(pickSetupLang('en-US', 'ja'), 'ja', '?lang= wins');
   assert.equal(pickSetupLang('en-US', 'xx'), 'en', 'an unknown ?lang= is ignored');
   assert.equal(pickSetupLang('en;q=0.5,ja;q=0.9'), 'ja', 'q-values are respected');
@@ -29,5 +32,6 @@ test('every language version links to the certificate and to the HTTPS app, and 
   assert.ok(!/[一-鿿]/.test(pages.en), 'the English page contains no Chinese');
   assert.ok(/[぀-ヿ]/.test(pages.ja), 'the Japanese page contains kana');
   assert.ok(!/[぀-ヿ]/.test(pages.zh), 'the Chinese page contains no kana');
-  assert.equal(setupPage({ httpsUrl: url, lang: 'xx' }), pages.zh, 'an unknown language falls back to Chinese');
+  assert.equal(setupPage({ httpsUrl: url, lang: 'xx' }), pages.en, 'an unknown language falls back to English');
+  assert.equal(setupPage({ httpsUrl: url }), pages.en);
 });

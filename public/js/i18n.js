@@ -1,7 +1,9 @@
-// Interface language: Traditional Chinese (default), English, Japanese.
+// Interface language: Traditional Chinese, English, Japanese. The setting is 'auto' (follow the phone, the default) or one
+// of those three, chosen by hand in Settings.
 //
 //   t(key, params)   translated string; {name} placeholders are filled from params
 //                    (a value may also be a function of params, used where plural forms matter)
+//   detectLang / resolveLang   which language the phone asks for; the setting 'auto' → that language
 //   setLang / getLang
 //   applyI18n(root)  fills every element marked with data-i18n / data-i18n-aria / data-i18n-ph
 //
@@ -32,6 +34,7 @@ export const STRINGS = {
     'chip.speed.aria': '朗讀速度', 'chip.sleep.aria': '睡眠計時', 'chip.text': '文字/問答', 'chip.text.aria': '顯示文字與問答紀錄',
     'chip.type': '⌨ 打字問', 'chip.type.aria': '用鍵盤輸入問題',
     'sleep.off': '睡眠 關', 'sleep.minutes': '睡眠 {n} 分', 'sleep.chapter': '睡眠 章末',
+    'book.resegmented': '已用新的斷句方式重新整理這本書，閱讀位置保留；AI 的記憶會隨著聽書重新整理。',
     'sleep.toastOff': '已關閉睡眠計時', 'sleep.toastChapter': '這一章結束後停止', 'sleep.toastMinutes': '{n} 分鐘後停止',
     // voice commands (spoken and shown after the AI has chosen a player action)
     'cmd.rewind': (p) => `倒回 ${p.n} 句`, 'cmd.atStart': '已經在最前面了', 'cmd.skip': (p) => `往後跳 ${p.n} 句`, 'cmd.atEnd': '已經到最後了',
@@ -55,7 +58,7 @@ export const STRINGS = {
     'paste.title': '貼上文字', 'paste.titlePh': '標題（選填）', 'paste.textPh': '把要聽的文章貼在這裡', 'paste.submit': '加入書櫃',
     'qa.empty': '這本書還沒有問過問題。', 'qa.q': '問：{q}', 'qa.meta': '{chapter} · 約 {pct}% 處',
 
-    'set.language': '介面語言 / Language / 言語',
+    'set.language': '介面語言 / Language / 言語', 'set.language.auto': '自動（跟隨手機語言）',
     'set.rate': '朗讀速度', 'set.voice': '朗讀聲音', 'set.answerVoice': 'AI 回答的聲音（依提問語言）',
     'set.testVoice': '試聽朗讀', 'set.testAnswer': '試聽回答', 'voice.auto': '自動（建議）', 'voice.online': '・線上',
     'set.sec.voice': '語音提問', 'set.sttMode': '辨識方式',
@@ -131,6 +134,7 @@ export const STRINGS = {
     'chip.speed.aria': 'Reading speed', 'chip.sleep.aria': 'Sleep timer', 'chip.text': 'Text/Q&A', 'chip.text.aria': 'Show text and Q&A history',
     'chip.type': '⌨ Type', 'chip.type.aria': 'Type a question with the keyboard',
     'sleep.off': 'Sleep: off', 'sleep.minutes': 'Sleep {n} min', 'sleep.chapter': 'Sleep: chapter end',
+    'book.resegmented': 'This book was re-cut with the improved sentence rules. Your place is kept; the AI\'s notes will be rebuilt as you listen.',
     'sleep.toastOff': 'Sleep timer off', 'sleep.toastChapter': 'Stops at the end of this chapter', 'sleep.toastMinutes': 'Stops in {n} minutes',
     // voice commands (spoken and shown after the AI has chosen a player action)
     'cmd.rewind': (p) => (p.n === 1 ? 'Back one sentence' : `Back ${p.n} sentences`), 'cmd.atStart': 'Already at the very beginning', 'cmd.skip': (p) => (p.n === 1 ? 'Skipping one sentence' : `Skipping ${p.n} sentences`), 'cmd.atEnd': 'Already at the very end',
@@ -154,7 +158,7 @@ export const STRINGS = {
     'paste.title': 'Paste text', 'paste.titlePh': 'Title (optional)', 'paste.textPh': 'Paste the text you want to listen to here', 'paste.submit': 'Add to library',
     'qa.empty': 'No questions asked about this book yet.', 'qa.q': 'Q: {q}', 'qa.meta': '{chapter} · about {pct}%',
 
-    'set.language': '介面語言 / Language / 言語',
+    'set.language': '介面語言 / Language / 言語', 'set.language.auto': 'Automatic (follow the phone)',
     'set.rate': 'Reading speed', 'set.voice': 'Reading voice', 'set.answerVoice': 'Voice for AI answers (by question language)',
     'set.testVoice': 'Preview reading', 'set.testAnswer': 'Preview answer', 'voice.auto': 'Automatic (recommended)', 'voice.online': ' · online',
     'set.sec.voice': 'Voice questions', 'set.sttMode': 'Recognition method',
@@ -229,6 +233,7 @@ export const STRINGS = {
     'chip.speed.aria': '読み上げ速度', 'chip.sleep.aria': 'スリープタイマー', 'chip.text': 'テキスト/Q&A', 'chip.text.aria': 'テキストと質問履歴を表示',
     'chip.type': '⌨ 入力', 'chip.type.aria': 'キーボードで質問を入力',
     'sleep.off': 'スリープ: オフ', 'sleep.minutes': 'スリープ {n}分', 'sleep.chapter': 'スリープ: 章の終わり',
+    'book.resegmented': 'この本を新しい文の区切り方で整理し直しました。再生位置はそのままで、AIのメモは聞き進めるうちに作り直されます。',
     'sleep.toastOff': 'スリープタイマーをオフにしました', 'sleep.toastChapter': 'この章の終わりで停止します', 'sleep.toastMinutes': '{n}分後に停止します',
     // voice commands (spoken and shown after the AI has chosen a player action)
     'cmd.rewind': (p) => `${p.n}文戻ります`, 'cmd.atStart': 'もう一番最初です', 'cmd.skip': (p) => `${p.n}文進みます`, 'cmd.atEnd': 'もう一番最後です',
@@ -252,7 +257,7 @@ export const STRINGS = {
     'paste.title': 'テキストを貼り付け', 'paste.titlePh': 'タイトル（任意）', 'paste.textPh': '聞きたい文章をここに貼り付けてください', 'paste.submit': '本棚に追加',
     'qa.empty': 'この本にはまだ質問していません。', 'qa.q': '質問：{q}', 'qa.meta': '{chapter} · 約{pct}%の地点',
 
-    'set.language': '介面語言 / Language / 言語',
+    'set.language': '介面語言 / Language / 言語', 'set.language.auto': '自動（端末の言語に合わせる）',
     'set.rate': '読み上げ速度', 'set.voice': '読み上げの声', 'set.answerVoice': 'AI回答の声（質問の言語に応じて）',
     'set.testVoice': '読み上げを試聴', 'set.testAnswer': '回答を試聴', 'voice.auto': '自動（推奨）', 'voice.online': '・オンライン',
     'set.sec.voice': '音声での質問', 'set.sttMode': '認識方法',
@@ -311,10 +316,37 @@ export const STRINGS = {
   },
 };
 
-let current = 'zh';
+/** What the phone's language settings are mapped to when none of them is one we have. */
+export const FALLBACK_LANG = 'en';
+/** The language setting that follows the phone. */
+export const LANG_AUTO = 'auto';
+
+let current = FALLBACK_LANG;
 export const getLang = () => current;
 export const isLang = (code) => Object.prototype.hasOwnProperty.call(STRINGS, code);
-export function setLang(code) { current = isLang(code) ? code : 'zh'; return current; }
+export function setLang(code) { current = isLang(code) ? code : FALLBACK_LANG; return current; }
+
+// Other names for Chinese that phones report (Cantonese, Mandarin, Wu, Min, Hakka, Gan). Our Chinese is Traditional,
+// the nearest we have for all of them.
+const CHINESE = new Set(['yue', 'cmn', 'wuu', 'nan', 'hak', 'gan']);
+
+/**
+ * The interface language a phone asks for: its language list, in order of preference ("ja-JP", "zh-Hant-TW", "en"),
+ * and the first one we have wins — so a phone set to French then Japanese gets Japanese. None → FALLBACK_LANG.
+ * Without `tags` the browser's own list is used.
+ */
+export function detectLang(tags) {
+  const list = tags ?? (typeof navigator === 'undefined' ? [] : navigator.languages?.length ? navigator.languages : [navigator.language]);
+  for (const tag of list) {
+    const primary = String(tag ?? '').toLowerCase().split(/[-_]/)[0];
+    const code = CHINESE.has(primary) ? 'zh' : primary;
+    if (isLang(code)) return code;
+  }
+  return FALLBACK_LANG;
+}
+
+/** The language to show for a stored setting: a language chosen by hand as it is, anything else ('auto') → the phone's. */
+export const resolveLang = (setting, tags) => (isLang(setting) ? setting : detectLang(tags));
 
 /** `lang` may be a full BCP-47 tag ("ja-JP"); anything unsupported means "the current language". */
 export function tIn(lang, key, params) {
