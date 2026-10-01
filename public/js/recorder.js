@@ -66,6 +66,7 @@ export class VoiceRecorder {
     this.finish = null;
     this.starting = false;
     this.cancelStart = false;
+    this.heard = false; // something that sounds like speech has been picked up in the current recording
   }
 
   get active() { return !!this.finish; }
@@ -77,7 +78,7 @@ export class VoiceRecorder {
   async record({ onLevel = () => {}, vad = {}, onReady = () => {}, ignoreMs = 0 } = {}) {
     if (!recorderSupported()) return { error: 'unsupported' };
     let stream;
-    this.starting = true; this.cancelStart = false;
+    this.starting = true; this.cancelStart = false; this.heard = false;
     try {
       stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
     } catch (err) {
@@ -146,6 +147,7 @@ export class VoiceRecorder {
           if (rms > 0) { sawSignal = true; ready(); } // a live microphone always carries at least a little noise
           if (!readyAt || performance.now() < ignoreUntil) { onLevel(0); return; }
           const verdict = tracker.push(rms, performance.now());
+          if (tracker.spoke || tracker.speechMs >= 200 || tracker.blind) this.heard = true; // (a meter that does not work cannot tell: assume yes)
           onLevel(tracker.level);
           if (verdict === 'end') done('end');
           else if (verdict === 'no-speech') done('no-speech');
@@ -160,7 +162,7 @@ export class VoiceRecorder {
       } catch {
         // No meter available: record until tapped (or 20 s).
         timer = setTimeout(() => done('max'), 20000);
-        tracker.blind = true;
+        tracker.blind = true; this.heard = true;
       }
 
       rec.onstart = ready;

@@ -107,7 +107,7 @@ export const clearMemory = async (id) => { await store.del('memory', id); await 
 // ---- settings (small, synchronous, localStorage)
 const SETTINGS_KEY = 'audiobook-settings-v1';
 export const DEFAULT_SETTINGS = {
-  v: 3,
+  v: 6,
   uiLang: 'auto',        // interface language: 'auto' = follow the phone (default) | 'zh' | 'en' | 'ja' once chosen by hand
   rate: 1.0,
   voiceURI: {},          // per language: {'zh-TW': 'voiceURI'}
@@ -123,8 +123,12 @@ export const DEFAULT_SETTINGS = {
   sleepMinutes: 0,
   haptics: true,
   shake: false,          // shake the phone to start asking (off by default)
-  shakeSens: 'normal',   // 'low' | 'normal' | 'high'
+  shakeThreshold: 10,    // shake sensitivity: how big a jolt counts, 2–50 (shake.js's threshold; the smaller, the easier it triggers)
   earcons: true,
+  mixedVoice: 'words',   // reading text that mixes languages: 'words' (every foreign word gets its language's voice) | 'phrases' | 'off' (one voice)
+  engine: 'device',      // who makes the voice: 'device' (the phone's own — the default) | 'server' (audio made by the server, see tts-providers.js)
+  serverVoice: {},       // per language: the server voice chosen for reading the book ({'zh-TW': 'zh-TW-HsiaoChenNeural'}); missing = the server's pick
+  serverAnswerVoice: {}, // the same for the AI's answers
 };
 export function loadSettings() {
   try {
@@ -135,6 +139,19 @@ export function loadSettings() {
     // other setting, so a stored 'zh' cannot be told from a choice and goes back to following the phone; a stored 'en' or
     // 'ja' was always chosen by hand and stays. From v3 on, whatever is stored is the listener's own choice.
     if ((stored.v || 1) < 3) { if (stored.uiLang === 'zh') delete stored.uiLang; stored.v = 3; }
+    // v4: single English words in a Chinese/Japanese/… text are read by the English voice by default. 'phrases' used to be the
+    // default and was saved together with every other setting, so a stored 'phrases' cannot be told from a choice: it moves to
+    // the new default once (and can be chosen again in Settings).
+    if ((stored.v || 1) < 4) { if (stored.mixedVoice === 'phrases') delete stored.mixedVoice; stored.v = 4; }
+    // v5: the shake sensitivity is a number the listener sets with a slider; the three levels it replaces keep their meaning.
+    if ((stored.v || 1) < 5) {
+      const level = { low: 6, normal: 3.5, high: 2.5 }[stored.shakeSens];
+      if (level && stored.shakeThreshold === undefined) stored.shakeThreshold = level;
+      delete stored.shakeSens; stored.v = 5;
+    }
+    // v6: the default is 10 (it was 3.5). Whatever was saved with the default cannot be told from a choice, so a stored 3.5 moves to the
+    // new default once; any other number was chosen and stays.
+    if ((stored.v || 1) < 6) { if (stored.shakeThreshold === 3.5) delete stored.shakeThreshold; stored.v = 6; }
     return { ...DEFAULT_SETTINGS, ...stored };
   } catch { return { ...DEFAULT_SETTINGS }; }
 }

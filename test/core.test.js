@@ -189,6 +189,10 @@ test('language helpers', () => {
   assert.equal(detectLangFromText('Hello there, this is an English sentence.', 'fr-FR'), 'fr-FR');
   assert.equal(resolveBookLang('en', 'Just some English text here for a book.'), 'en-US');
   assert.equal(chineseVariant('', 'zh-Hant'), 'zh-TW');
+  // a short phrase is enough to tell the scripts apart (a hint of "zh-TW" or "en-US" must not win over the characters)
+  assert.equal(chineseVariant('他买了一部手机', 'en-US'), 'zh-CN');
+  assert.equal(chineseVariant('他買了一部手機', 'zh-CN'), 'zh-TW');
+  assert.equal(chineseVariant('谁没吃饭？', 'zh-TW'), 'zh-CN');
   assert.equal(normalizeText('你 好  world ​'), '你好 world');
 });
 
@@ -236,4 +240,19 @@ test('spoken language of mixed sentences: a Chinese sentence quoting English is 
   assert.equal(detectSpokenLang('これはどういう意味ですか', 'en-US'), 'ja-JP');
   assert.equal(detectSpokenLang('이 문장은 무슨 뜻인가요', 'en-US'), 'ko-KR');
   assert.equal(detectSpokenLang('Why did he leave?', 'fr-FR'), 'fr-FR');
+});
+
+test('spoken language of mixed sentences: an English sentence quoting Chinese stays English, however long the quotation', async () => {
+  const { detectSpokenLang } = await import('../public/js/lang.js');
+  assert.equal(detectSpokenLang('What does the sentence 不積跬步，無以至千里 mean?', 'zh-TW'), 'en-US');
+  assert.equal(detectSpokenLang('Please explain 這個成語的意思 in simple words', 'zh-TW'), 'en-US');
+  assert.equal(detectSpokenLang('Who is 老周 in this story so far?', 'zh-CN'), 'en-US');
+  assert.equal(detectSpokenLang('Que signifie le mot 鑰匙的意思 dans cette histoire ?', 'zh-TW'), 'en-US', 'Latin script: the language itself is not told apart, the fallback rule applies');
+  assert.equal(detectSpokenLang('Что значит слово 鑰匙的意思 в этой истории?', 'zh-TW'), 'ru-RU', 'Cyrillic outside the quotation: Russian');
+  // …while these are Chinese or Japanese sentences with foreign words in them
+  assert.equal(detectSpokenLang('Apple Store 買了一台 iPhone', 'zh-TW'), 'zh-TW', 'a few words outside are not a clause');
+  assert.equal(detectSpokenLang('這本書的作者 Jane Austen 在 1813 年出版了 Pride and Prejudice', 'zh-TW'), 'zh-TW');
+  assert.equal(detectSpokenLang('Apple Store で iPhone を買って Apple Care に入った', 'en-US'), 'ja-JP', 'kana all through the sentence: Japanese');
+  assert.equal(detectSpokenLang('請問 deadline 這個字在這裡是什麼意思？', 'zh-TW'), 'zh-TW');
+  assert.equal(detectSpokenLang('Never mind 算了吧不用了', 'zh-TW'), 'zh-TW', 'ends in CJK');
 });

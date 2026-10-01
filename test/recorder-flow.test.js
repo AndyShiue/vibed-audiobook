@@ -93,3 +93,25 @@ test('tapping to finish delivers what was recorded so far', async () => {
   assert.equal(result.reason, 'manual');
   assert.equal(log.stopped, 1);
 });
+
+test('the recorder says whether anything that sounds like speech has been heard yet (a second tap before that goes back to "tap to ask")', async () => {
+  let readyRel = null;
+  const { log, ctx } = install({ level: (t) => (readyRel !== null && t > readyRel + 500 && t < readyRel + 1500 ? 0.2 : 0.002) });
+  const rec = new VoiceRecorder(() => ctx);
+  assert.equal(rec.heard, false, 'before anything');
+  const pending = rec.record({ vad: VAD, onReady: () => { readyRel = performance.now() - log.openedAt; } });
+  await wait(450);
+  assert.equal(rec.heard, false, 'the quiet room is not speech');
+  await wait(700);
+  assert.equal(rec.heard, true, 'the speaker has been talking for a while');
+  rec.stop();
+  await pending;
+  // a cough or a click is not speech
+  const quiet = install({ level: (t) => (t > 300 && t < 360 ? 0.3 : 0.002) });
+  const rec2 = new VoiceRecorder(() => quiet.ctx);
+  const done2 = rec2.record({ vad: VAD });
+  await wait(800);
+  assert.equal(rec2.heard, false, 'a click of 60 ms');
+  rec2.abort();
+  await done2;
+});

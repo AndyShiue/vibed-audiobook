@@ -29,6 +29,33 @@ export async function summarize(request, signal) {
 }
 
 /**
+ * One clip of server voices (see tts-providers.js) as audio. `text` is the text as written: the server cuts it by language when
+ * `mixed` is 'words' or 'phrases' (see speech-plan.js) and reads each piece with the voice for its language, taken from `voices`
+ * ({language: voice id}) or else its own pick. With `mixed` 'off' (or none) the whole text is read with `voice`, or the server's
+ * pick for `lang`. Rejects with an Error (with .status) when the server cannot make it.
+ */
+export async function ttsClip({ text, lang, voice = '', voices, mixed }, { signal } = {}) {
+  const r = await fetch('/api/tts', { method: 'POST', headers: headers(), body: JSON.stringify({ text, lang, voice, voices, mixed }), signal });
+  if (!r.ok) {
+    let msg = '';
+    try { msg = (await r.json()).error; } catch { /* ignore */ }
+    throw httpError(r.status, msg);
+  }
+  return r.blob();
+}
+
+/** The server voices for a language, best first: { provider, label, voices:[{id, name, lang, gender, multilingual}], defaultVoice }. */
+export async function ttsVoices(lang, { signal } = {}) {
+  const r = await fetch('/api/tts/voices', { method: 'POST', headers: headers(), body: JSON.stringify({ lang }), signal });
+  if (!r.ok) {
+    let msg = '';
+    try { msg = (await r.json()).error; } catch { /* ignore */ }
+    throw httpError(r.status, msg);
+  }
+  return r.json();
+}
+
+/**
  * Ask a question; text arrives as a stream. `onText(delta)` is called for each chunk.
  * Resolves {refusal:boolean, tools:[{name, input}]} — `tools` are the player commands the AI chose to call, in order.
  * Rejects with an Error (with .status) on failure.

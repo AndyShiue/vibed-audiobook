@@ -6,8 +6,15 @@ const DEFAULT_REGION = {
   pl: 'pl-PL', tr: 'tr-TR', sv: 'sv-SE', ja: 'ja-JP', ko: 'ko-KR', ar: 'ar-SA', hi: 'hi-IN', th: 'th-TH', vi: 'vi-VN', id: 'id-ID',
 };
 
-const TRAD = '這們說對個時來從長見問過還發動將麼點開東車書學國會經實現電氣頭無與為產業務兩應關體機馬鳥龍愛讓後裡間點總樣邊條';
-const SIMP = '这们说对个时来从长见问过还发动将么点开东车书学国会经实现电气头无与为产业务两应关体机马鸟龙爱让后里间点总样边条';
+// Characters written differently in Traditional (TRAD) and Simplified (SIMP) Chinese, in the same order. Only characters that
+// are not ordinary Traditional ones in their simplified form count, so a short phrase is told apart from a couple of letters.
+const TRAD = '這們說對個時來從長見問過還發動將麼點開東車書學國會經實現電氣頭無與為產業務兩應關體機馬鳥龍愛讓後裡間點總樣邊條'
+  + '買賣讀請誰沒嗎難認識話語聽記錢興華員歲雙萬覺師樂歡幫帶導當戰紅級給結種輕離運遠選陽約報場兒門飛風魚雞藝醫辦廳壓腦臉頁寫題'
+  + '麗協單團圖園壞夢夠奪寶屬層嶺幣廣張彈憑憶懷戲掛擇據數暫楊樹橋檢歷殺毀滿漢澤營爺該詳誤課調談論諸證設許評護譯費資賽趕鄉鐘鐵銀鋼閱陣隊隨雖靈響頂順顯飯館驗驚鮮麥黨齊齡';
+const SIMP = '这们说对个时来从长见问过还发动将么点开东车书学国会经实现电气头无与为产业务两应关体机马鸟龙爱让后里间点总样边条'
+  + '买卖读请谁没吗难认识话语听记钱兴华员岁双万觉师乐欢帮带导当战红级给结种轻离运远选阳约报场儿门飞风鱼鸡艺医办厅压脑脸页写题'
+  + '丽协单团图园坏梦够夺宝属层岭币广张弹凭忆怀戏挂择据数暂杨树桥检历杀毁满汉泽营爷该详误课调谈论诸证设许评护译费资赛赶乡钟铁银钢阅阵队随虽灵响顶顺显饭馆验惊鲜麦党齐龄';
+if (TRAD.length !== SIMP.length) throw new Error('lang.js: TRAD and SIMP must line up character by character');
 
 /** Count characters that only exist in one script (positions differ between the two strings). */
 export function chineseVariant(text, tagHint = '') {
@@ -56,6 +63,30 @@ export function detectLangFromText(text, fallback = 'en-US') {
   return /^(zh|ja|ko|ru)/i.test(fallback) ? 'en-US' : fallback;
 }
 
+const CJK_LETTER = /[぀-ヿ㐀-䶿一-鿿豈-﫿가-힯]/;
+
+/**
+ * A sentence that starts and ends in a non-CJK script, with Chinese/Japanese/Korean only in one or two stretches between, is a
+ * sentence in that language quoting some CJK — "What does the sentence 不積跬步，無以至千里 mean?" — not a Chinese one, however
+ * many characters the quotation has. A few words on the outside are not enough (a short CJK term between two English words can
+ * just as well be a Chinese sentence: "Apple Store 買了一台 iPhone"), and Japanese has kana all through the sentence.
+ * Returns the sentence without its CJK stretches, or '' when the rule does not apply.
+ */
+function latinSentenceQuotingCJK(text) {
+  const letters = [...text].filter((c) => /\p{L}/u.test(c));
+  if (!letters.length || CJK_LETTER.test(letters[0]) || CJK_LETTER.test(letters[letters.length - 1])) return '';
+  let stretches = 0, kana = 0, prevCjk = false;
+  for (const c of letters) {
+    const cjk = CJK_LETTER.test(c);
+    if (cjk && !prevCjk) stretches++;
+    if (/[぀-ヿ]/.test(c)) kana++;
+    prevCjk = cjk;
+  }
+  if (!stretches || stretches > 2 || kana >= 2) return '';
+  const outside = text.replace(new RegExp(CJK_LETTER.source, 'g'), ' ');
+  return (outside.match(/\p{L}+/gu) || []).length >= 4 ? outside : '';
+}
+
 /**
  * Language a (possibly mixed) sentence is *spoken* in. Character counts mislead here: English words are long, so
  * "這句話 The quick brown fox jumps over the lazy dog 是什麼意思" has more Latin than Chinese letters, yet it is a
@@ -63,6 +94,8 @@ export function detectLangFromText(text, fallback = 'en-US') {
  * amount of CJK text decides the sentence's language; only text with (almost) none is treated as Latin-script.
  */
 export function detectSpokenLang(text, fallback = 'en-US') {
+  const outside = latinSentenceQuotingCJK(text);
+  if (outside) return detectLangFromText(outside, /^(zh|ja|ko)/i.test(fallback) ? 'en-US' : fallback);
   let han = 0, kana = 0, hangul = 0, letters = 0;
   for (const ch of text) {
     const c = ch.codePointAt(0);

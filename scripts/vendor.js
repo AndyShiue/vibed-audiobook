@@ -25,9 +25,10 @@ try {
   copy(nm('mammoth', 'mammoth.browser.min.js'), out('mammoth.browser.min.js'));
   copy(nm('pdfjs-dist', 'build', 'pdf.min.mjs'), out('pdfjs', 'pdf.min.mjs'));
   copy(nm('pdfjs-dist', 'build', 'pdf.worker.min.mjs'), out('pdfjs', 'pdf.worker.min.mjs'));
+  copy(nm('shake.js', 'shake.js'), out('shake.js')); // "shake the phone to ask" (MIT, Alex Gibson)
   copyDir(nm('pdfjs-dist', 'cmaps'), out('pdfjs', 'cmaps'));
   copyDir(nm('pdfjs-dist', 'standard_fonts'), out('pdfjs', 'standard_fonts'));
-  console.log('vendor: copied jszip, mammoth, pdf.js (+cmaps, fonts) to public/vendor');
+  console.log('vendor: copied jszip, mammoth, shake.js, pdf.js (+cmaps, fonts) to public/vendor');
 } catch (err) {
   console.error('vendor: copy failed —', err.message);
   console.error('Run "npm install" first.');

@@ -109,6 +109,33 @@ test('settings saved by earlier versions: a stored "zh" was only the old default
   withStorage('{not json', () => assert.equal(loadSettings().uiLang, 'auto'));
 });
 
+test('settings saved before v4: the old default "phrases" moves to the new default once, a choice made later stays', () => {
+  withStorage({ v: 3, mixedVoice: 'phrases', rate: 1.3 }, () => {
+    const s = loadSettings();
+    assert.equal(s.mixedVoice, 'words');
+    assert.equal(s.rate, 1.3, 'nothing else is touched');
+  });
+  withStorage({ v: 3, mixedVoice: 'off' }, () => assert.equal(loadSettings().mixedVoice, 'off'));
+  withStorage({ v: 4, mixedVoice: 'phrases' }, () => assert.equal(loadSettings().mixedVoice, 'phrases', 'chosen by hand after the change'));
+  withStorage({}, () => assert.equal(loadSettings().mixedVoice, 'words'));
+});
+
+test('settings saved before v6: the three shake levels become their numbers, the old default 3.5 becomes the new default 10, a number chosen later stays', () => {
+  withStorage({ v: 4, shakeSens: 'high', rate: 1.3 }, () => {
+    const s = loadSettings();
+    assert.equal(s.shakeThreshold, 2.5);
+    assert.equal(s.shakeSens, undefined, 'the old key is gone');
+    assert.equal(s.rate, 1.3, 'nothing else is touched');
+  });
+  withStorage({ v: 4, shakeSens: 'normal' }, () => assert.equal(loadSettings().shakeThreshold, 10, '"normal" was the old default'));
+  withStorage({ v: 4, shakeSens: 'low' }, () => assert.equal(loadSettings().shakeThreshold, 6));
+  withStorage({ v: 3 }, () => assert.equal(loadSettings().shakeThreshold, 10, 'no choice made: the default'));
+  withStorage({ v: 5, shakeThreshold: 12 }, () => assert.equal(loadSettings().shakeThreshold, 12));
+  withStorage({ v: 5, shakeThreshold: 3.5 }, () => assert.equal(loadSettings().shakeThreshold, 10, 'the old default, saved along with everything else'));
+  withStorage({ v: 6, shakeThreshold: 3.5 }, () => assert.equal(loadSettings().shakeThreshold, 3.5, 'chosen by hand after the change'));
+  withStorage({}, () => assert.equal(loadSettings().shakeThreshold, 10));
+});
+
 test('all three languages define exactly the same keys', () => {
   const zh = Object.keys(STRINGS.zh).sort();
   for (const lang of ['en', 'ja']) {
@@ -171,7 +198,7 @@ test('t() fills placeholders and falls back sensibly', () => {
 });
 
 test('English strings contain no Chinese characters (except the deliberate multilingual ones)', () => {
-  const allowed = new Set(['set.language', 'preview.narration.zh', 'preview.answer.zh', 'preview.narration.ja', 'preview.answer.ja']); // previews are spoken in the voice's own language
+  const allowed = new Set(['set.language', 'preview.narration.zh', 'preview.answer.zh', 'preview.narration.ja', 'preview.answer.ja', 'preview.mixed.zh', 'preview.mixed.ja', 'preview.mixed.en']); // previews are spoken in the voice's own language
   for (const [key, value] of Object.entries(STRINGS.en)) {
     if (typeof value !== 'string' || allowed.has(key)) continue;
     assert.ok(!HAN.test(value), `en:${key} still contains Chinese: ${value}`);
@@ -179,7 +206,7 @@ test('English strings contain no Chinese characters (except the deliberate multi
 });
 
 test('Japanese strings are really translated (not copies of the Chinese ones)', () => {
-  const allowedSame = new Set(['quote', 'shake.normal', 'set.language', 'lib.formatsList', 'preview.narration.zh', 'preview.answer.zh', 'preview.narration.ja', 'preview.answer.ja', 'preview.narration.en', 'preview.answer.en']);
+  const allowedSame = new Set(['quote', 'shake.normal', 'set.language', 'lib.formatsList', 'preview.narration.zh', 'preview.answer.zh', 'preview.narration.ja', 'preview.answer.ja', 'preview.narration.en', 'preview.answer.en', 'preview.mixed.zh', 'preview.mixed.ja', 'preview.mixed.en']);
   for (const [key, value] of Object.entries(STRINGS.ja)) {
     if (typeof value !== 'string' || allowedSame.has(key) || value.length <= 6) continue;
     assert.notEqual(value, STRINGS.zh[key], `ja:${key} is identical to the Chinese text`);

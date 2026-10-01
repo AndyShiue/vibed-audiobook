@@ -18,6 +18,7 @@ import { OpenAIError, effortCandidates, isEffortError, pickApi, request as opena
 import { lanAddresses } from './lan-cert.js';
 import { buildTranscribePrompt, isPromptEcho } from './stt-prompt.js';
 import { setupPage, pickSetupLang } from './setup-page.js';
+import { ttsConfig, createTts, publicInfo as ttsPublicInfo, TtsError } from './tts-providers.js';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(ROOT, 'public');
@@ -80,6 +81,11 @@ function transcribeConfig() {
   return { available, provider: MOCK ? 'mock' : provider, base, key: preset.key || '', model: env.TRANSCRIBE_MODEL || preset.model };
 }
 const STT = transcribeConfig();
+
+// Server voices (the player's second voice engine; the first is the phone's own): TTS_PROVIDER picks who makes the audio.
+const TTS_CFG = ttsConfig(process.env, { mock: MOCK });
+const TTS = TTS_CFG.available ? createTts(TTS_CFG, { cacheBytes: (Number(process.env.TTS_CACHE_MB) || 64) * 1024 * 1024 }) : null;
+if (TTS_CFG.reason && TTS_CFG.reason !== 'off') console.warn(`[config] server voices (TTS_PROVIDER=${TTS_CFG.provider}) are not available: ${TTS_CFG.reason}`);
 let lastAsk = null; // mock-mode only: lets tests inspect exactly what would have been sent
 
 // ---------------------------------------------------------------- helpers
@@ -425,6 +431,45 @@ async function handleTranscribe(req, res) {
   return send(res, 200, { text, model: STT.model, languages: data.languages });
 }
 
+// ---------------------------------------------------------------- /api/tts (server voices)
+function ttsUnavailable(res) {
+  return send(res, 503, { error: `Server voices are not available on this server${TTS_CFG.reason ? ` (${TTS_CFG.reason})` : ''}.` });
+}
+
+function ttsFailed(res, err, what) {
+  if (err instanceof TtsError) {
+    if (err.status >= 500) console.error(`[tts] ${what}: ${err.message}`);
+    return send(res, err.status, { error: err.message });
+  }
+  console.error(`[tts] ${what}:`, err);
+  return send(res, 500, { error: 'server voices failed unexpectedly' });
+}
+
+async function handleTtsVoices(req, res) {
+  const body = await readJson(req, 4_000);
+  if (!TTS) return ttsUnavailable(res);
+  try {
+    const found = await TTS.voices(typeof body.lang === 'string' ? body.lang : '');
+    return send(res, 200, { provider: TTS.provider, label: TTS.label, ...found });
+  } catch (err) { return ttsFailed(res, err, 'voices'); }
+}
+
+async function handleTts(req, res) {
+  const body = await readJson(req, 20_000);
+  if (!TTS) return ttsUnavailable(res);
+  if (typeof body.text !== 'string') return send(res, 400, { error: 'text missing' });
+  const t0 = Date.now();
+  try {
+    const out = await TTS.synthesize({
+      text: body.text, lang: typeof body.lang === 'string' ? body.lang : '', voice: typeof body.voice === 'string' ? body.voice : '',
+      voices: body.voices, mixed: typeof body.mixed === 'string' ? body.mixed : '',
+    });
+    console.log(`[tts] ${TTS.provider}/${out.voice} ${[...body.text].length} chars${out.parts > 1 ? `, ${out.parts} parts` : ''} → ${Math.round(out.audio.length / 1024)} KB in ${Date.now() - t0} ms${out.cached ? ' (cached)' : ''}`); // never the text itself
+    res.writeHead(200, { 'Content-Type': out.type, 'Content-Length': out.audio.length, 'Cache-Control': 'no-store', 'X-TTS-Voice': out.voice, 'X-TTS-Parts': out.parts });
+    return res.end(out.audio);
+  } catch (err) { return ttsFailed(res, err, 'synthesize'); }
+}
+
 // ---------------------------------------------------------------- static files
 function serveStatic(req, res, urlPath, base = PUBLIC) {
   let rel = decodeURIComponent(urlPath);
@@ -456,7 +501,7 @@ async function route(req, res) {
     if (p.startsWith('/api/')) {
       const ip = req.socket.remoteAddress || '?';
       if (p === '/api/config' && req.method === 'GET') {
-        return send(res, 200, { ai: AI_READY, mock: MOCK, needsToken: Boolean(ACCESS_TOKEN), models: { qa: QA_MODEL, summary: SUMMARY_MODEL }, providers: { qa: QA_PROVIDER, summary: SUMMARY_PROVIDER }, stt: { available: STT.available, provider: STT.provider, model: STT.model || '' } });
+        return send(res, 200, { ai: AI_READY, mock: MOCK, needsToken: Boolean(ACCESS_TOKEN), models: { qa: QA_MODEL, summary: SUMMARY_MODEL }, providers: { qa: QA_PROVIDER, summary: SUMMARY_PROVIDER }, stt: { available: STT.available, provider: STT.provider, model: STT.model || '' }, tts: ttsPublicInfo(TTS_CFG) });
       }
       if (p === '/api/debug/last-ask' && MOCK) return send(res, 200, lastAsk || {});
       if (req.method !== 'POST') return send(res, 405, { error: 'method not allowed' });
@@ -465,6 +510,8 @@ async function route(req, res) {
       if (p === '/api/ask') return await handleAsk(req, res);
       if (p === '/api/summarize') return await handleSummarize(req, res);
       if (p === '/api/transcribe') return await handleTranscribe(req, res);
+      if (p === '/api/tts') return await handleTts(req, res);
+      if (p === '/api/tts/voices') return await handleTtsVoices(req, res);
       return send(res, 404, { error: 'unknown endpoint' });
     }
     if (req.method !== 'GET' && req.method !== 'HEAD') return send(res, 405, 'method not allowed');
@@ -561,6 +608,7 @@ if (certs) {
   for (const ip of lan) console.log(`  • On your network: http://${ip}:${PORT}${tag(ip)}   (reading works; the microphone needs HTTPS — set HTTPS=1)`);
 }
 console.log(`  • Voice: ${STT.available ? `cloud speech recognition via ${STT.provider} (${STT.model || 'mock'})` : 'phone built-in recognition only (set OPENAI_API_KEY or GROQ_API_KEY for cloud recognition that handles mixed languages)'}`);
+console.log(`  • Server voices (optional engine in Settings): ${TTS ? `${TTS.label}${TTS.official ? '' : ' — unofficial, can stop working any time'}` : `off${TTS_CFG.reason && TTS_CFG.reason !== 'off' ? ` (${TTS_CFG.reason})` : ''}`}`);
 const AI_NAME = { anthropic: 'Claude', openai: 'OpenAI' };
 console.log(`  • AI: ${MOCK ? 'MOCK mode (no API calls)' : AI_READY ? `${QA_PROVIDER === SUMMARY_PROVIDER ? AI_NAME[QA_PROVIDER] : `${AI_NAME[QA_PROVIDER]} / ${AI_NAME[SUMMARY_PROVIDER]}`} — answers: ${QA_MODEL}, memory: ${SUMMARY_MODEL}` : `NOT CONFIGURED (set ${MISSING_KEYS.join(' and ')} in .env)`}`);
 if (!MOCK && AI_READY && usesProvider('openai')) console.log(`    OpenAI API: ${OPENAI_API === 'responses' ? 'Responses' : 'Chat Completions'} (${OPENAI_BASE}), reasoning effort: ${process.env.QA_EFFORT || 'auto → low'}`);

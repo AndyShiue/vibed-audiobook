@@ -153,9 +153,23 @@
         </select></label>
       <label class="row"><span><span data-i18n="set.rate">朗讀速度</span> <b id="rateVal">1.0×</b></span>
         <input id="setRate" type="range" min="0.6" max="2" step="0.05"></label>
+      <label class="row"><span data-i18n="set.engine">語音引擎</span>
+        <select id="setEngine">
+          <option value="device" data-i18n="set.engine.device">手機語音（預設，不需要網路）</option>
+          <option value="server" data-i18n="set.engine.server">伺服器語音（音質較好，需要網路）</option>
+        </select></label>
+      <div class="row info" id="engineInfo"></div>
       <label class="row"><span data-i18n="set.voice">朗讀聲音</span><select id="setVoice"></select></label>
+      <label class="row" id="rowVoiceAlt"><span data-i18n="set.voiceAlt">夾雜的英文用的聲音</span><select id="setVoiceAlt"></select></label>
+      <div class="row info" id="voiceHint" data-i18n="voice.noEnglish" hidden>這支手機沒有英文語音，夾雜的英文只能用中文聲音念。</div>
       <label class="row"><span data-i18n="set.answerVoice">AI 回答的聲音（依提問語言）</span><select id="setAnswerVoice"></select></label>
-      <div class="row buttons"><button id="btnTestVoice" class="btn small" data-i18n="set.testVoice">試聽朗讀</button><button id="btnTestAnswer" class="btn small" data-i18n="set.testAnswer">試聽回答</button></div>
+      <label class="row" id="rowMixed"><span data-i18n="set.mixed">夾雜外語時</span>
+        <select id="setMixed">
+          <option value="words" data-i18n="set.mixed.words">每個外語字詞都換成該語言的聲音（建議）</option>
+          <option value="phrases" data-i18n="set.mixed.phrases">只有外語片語換聲音，單字不換（銜接較順）</option>
+          <option value="off" data-i18n="set.mixed.off">全部用同一個聲音</option>
+        </select></label>
+      <div class="row buttons"><button id="btnTestVoice" class="btn small" data-i18n="set.testVoice">試聽朗讀</button><button id="btnTestAnswer" class="btn small" data-i18n="set.testAnswer">試聽回答</button><button id="btnTestMixed" class="btn small" data-i18n="set.testMixed">試聽夾雜</button></div>
       <div class="section-title" data-i18n="set.sec.voice">語音提問</div>
       <label class="row"><span data-i18n="set.sttMode">辨識方式</span>
         <select id="setSttMode">
@@ -189,13 +203,11 @@
       <label class="row check"><input id="setTitle" type="checkbox"><span data-i18n="set.sendTitle">讓 AI 知道書名與作者（回答較準，但 AI 可能記得後面的劇情）</span></label>
       <div class="section-title" data-i18n="set.sec.gesture">手勢</div>
       <label class="row check"><input id="setShake" type="checkbox"><span data-i18n="set.shake">搖晃手機來開始提問（預設關閉）。相當於點一下大按鈕；需要螢幕亮著。</span></label>
-      <label class="row" id="shakeSensRow" hidden><span data-i18n="set.shakeSens">搖晃靈敏度</span>
-        <select id="setShakeSens">
-          <option value="low" data-i18n="shake.low">低（要用力搖，最不會誤觸）</option>
-          <option value="normal" data-i18n="shake.normal">中</option>
-          <option value="high" data-i18n="shake.high">高（輕搖就觸發，走路或慢跑時可能誤觸）</option>
-        </select></label>
+      <label class="row" id="shakeSensRow" hidden><span><span data-i18n="set.shakeSens">搖晃靈敏度（門檻）</span> <b id="shakeSensVal">10</b></span>
+        <input id="setShakeSens" type="range" min="0" max="1000" step="1"></label>
+      <div class="row info" id="shakeSensHint" data-i18n="set.shakeSensHint" hidden>2～50，數字越小越容易觸發。</div>
       <div class="row info" id="shakeInfo" hidden></div>
+      <div class="row info" id="shakeMeter" hidden><div class="shake-bar"><span id="shakeBar"></span><i></i></div><div id="shakeMeterText"></div></div>
       <div class="section-title" data-i18n="set.sec.advanced">進階</div>
       <label class="row" id="tokenRow"><span data-i18n="set.token">存取密碼（伺服器有設定時才需要）</span><input id="setToken" type="password" autocomplete="off"></label>
       <div class="row info" id="aiInfo"></div>

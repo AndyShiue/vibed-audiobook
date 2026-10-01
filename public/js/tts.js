@@ -10,6 +10,7 @@
 import { detectSpokenLang, normalizeTag } from './lang.js';
 import { sleep, cjkRatio } from './util.js';
 import { breakLong, scanSentences } from './segmenter.js';
+import { planSpeech, cleanForSpeech, MIXED_MODES, DEFAULT_MIXED_MODE } from './speech-plan.js';
 
 const getSynth = () => globalThis.speechSynthesis || null;
 export const ttsSupported = () => !!getSynth() && typeof SpeechSynthesisUtterance !== 'undefined';
@@ -31,7 +32,11 @@ export function loadVoices(timeout = 2000) {
 
 const normVoiceLang = (v) => String(v.lang || '').replace('_', '-');
 
-function voiceScore(v, lang) {
+// Voices that ship with macOS / iOS as novelties or in an old, thin synthesis — never the right choice for a book.
+const NOVELTY_VOICE = /^(albert|bad news|bahh|bells|boing|bubbles|cellos|good news|jester|organ|superstar|trinoids|whisper|wobble|zarvox)\b/i;
+const OLD_VOICE = /^(fred|ralph|kathy|junior|princess|agnes|victoria|bruce|vicki)\b/i;
+
+export function voiceScore(v, lang) {
   const vl = normVoiceLang(v).toLowerCase();
   const want = lang.toLowerCase();
   const wantPrimary = want.split('-')[0];
@@ -43,7 +48,11 @@ function voiceScore(v, lang) {
     if (trad(vl) === trad(want)) s += 60; // don't read Traditional text with a mainland voice if avoidable
     if (vl.startsWith('zh-cn') && !trad(want)) s += 20;
   } else if (vl.startsWith(want.slice(0, 2)) && vl.slice(3, 5) === want.slice(3, 5)) s += 50;
-  if (/natural|neural|premium|enhanced|online|wavenet/i.test(v.name)) s += 25;
+  const label = `${v.name} ${v.voiceURI || ''}`; // iOS puts "compact" / "enhanced" / "premium" in the URI, not the name
+  if (/natural|neural|premium|enhanced|online|wavenet|siri/i.test(label)) s += 25;
+  if (/compact/i.test(label)) s -= 15;
+  if (NOVELTY_VOICE.test(v.name)) s -= 80;
+  else if (OLD_VOICE.test(v.name)) s -= 20;
   if (/google/i.test(v.name)) s += 10;
   if (!v.localService) s += 5;
   if (v.default) s += 1;
@@ -74,21 +83,73 @@ export function voicesFor(lang) {
     .sort((a, b) => voiceScore(b, lang) - voiceScore(a, lang));
 }
 
-// ---------------------------------------------------------------- text preparation
-/** Make book text friendlier for speech engines (they read some symbols aloud). */
-export function cleanForSpeech(text) {
-  return String(text)
-    .replace(/https?:\/\/\S+/g, '')
-    .replace(/\[\d{1,3}\]|［\d{1,3}］/g, '')
-    .replace(/[「」『』《》〈〉“”‘’"]/g, '')
-    .replace(/[…⋯]+|\.{3,}/g, '，')
-    .replace(/[—―─–]{1,}/g, '，')
-    .replace(/[*#_~`|^<>{}\\]/g, ' ')
-    .replace(/\p{Extended_Pictographic}/gu, '')
-    .replace(/[，,]\s*[，,]+/g, '，')
-    .replace(/\s+/g, ' ')
-    .trim();
+// ---------------------------------------------------------------- one text, several voices
+/** Setting "mixed languages": 'words' (default) | 'phrases' | 'off' — see speech-plan.js. */
+export const mixedMode = (settings) => (MIXED_MODES.includes(settings?.mixedVoice) ? settings.mixedVoice : DEFAULT_MIXED_MODE);
+
+const speakable = (s) => /[\p{L}\p{N}]/u.test(s);
+
+/**
+ * Parts to speak one after the other for a piece of text: one per run of one language, each with the language whose voice
+ * should read it. `lang` is the language of the book — or, for an answer, of the question, which is the language the AI
+ * answers in. `fallback(text)` gives the single language to use when the text is not split ("off", or nothing to split).
+ */
+export function speechParts(raw, { lang, settings, fallback }) {
+  const clean = cleanForSpeech(raw);
+  const mode = mixedMode(settings);
+  if (mode === 'off') return [{ text: clean, lang: fallback(clean) }];
+  const parts = planSpeech(raw, { lang, mode, hasVoice: (l) => Boolean(pickVoice(l)) })
+    .map((p) => ({ lang: p.lang, text: cleanForSpeech(p.text) })) // after planning: quotation marks were clues for it
+    .filter((p) => speakable(p.text));
+  return parts.length ? parts : [{ text: clean, lang: fallback(clean) }];
 }
+
+/** An utterance for one part, with the best voice the phone has for its language (or the one the listener chose). */
+function utteranceFor(part, { uri, rate, pitch = 1, plainVoice = false }) {
+  const u = new SpeechSynthesisUtterance(part.text);
+  const voice = plainVoice ? null : pickVoice(part.lang, uri(part.lang));
+  if (voice) { u.voice = voice; u.lang = voice.lang; } else u.lang = part.lang;
+  u.rate = rate;
+  u.pitch = pitch;
+  return u;
+}
+
+/** Speaks text with a voice per language (the settings screen's "preview mixed"). */
+export function speakMixed(text, { lang, settings, pitch = 1 }) {
+  const synth = getSynth();
+  if (!synth) return [];
+  synth.cancel();
+  const parts = speechParts(text, { lang, settings, fallback: (t) => detectSpokenLang(t, lang) });
+  const us = parts.map((p) => utteranceFor(p, { uri: (l) => settings.voiceURI?.[l], rate: settings.rate || 1, pitch }));
+  setTimeout(() => us.forEach((u) => synth.speak(u)), 60); // Chrome drops speak() issued right after cancel()
+  return us;
+}
+
+/**
+ * Speaks a short text with the phone's own voices, one utterance per language, and resolves when it is done (or cancelled).
+ * The fallback when a server voice fails.
+ */
+export function speakOnDevice(text, { lang, settings, rate = settings.rate || 1, pitch = 1 }) {
+  const synth = getSynth();
+  if (!synth) return { done: Promise.resolve(), cancel() {} };
+  const parts = speechParts(text, { lang, settings, fallback: (t) => detectSpokenLang(t, lang) });
+  const us = parts.map((p) => utteranceFor(p, { uri: (l) => settings.answerVoiceURI?.[l] || settings.voiceURI?.[l], rate, pitch }));
+  let finished = false, resolveDone, timer;
+  const done = new Promise((resolve) => { resolveDone = resolve; });
+  const finish = () => { if (finished) return; finished = true; clearTimeout(timer); resolveDone(); };
+  us.forEach((u, i) => {
+    u.onerror = finish;
+    if (i === us.length - 1) u.onend = finish;
+  });
+  timer = setTimeout(finish, 8000 + (parts.reduce((n, p) => n + p.text.length, 0) * 450) / rate);
+  us.forEach((u) => synth.speak(u));
+  return { done, cancel() { if (!finished) { synth.cancel(); finish(); } } };
+}
+
+// ---------------------------------------------------------------- text preparation
+// cleanForSpeech (make text friendlier for speech engines: they read some symbols aloud) lives in speech-plan.js, which the
+// server uses too; it is exported from here as well because this is where the rest of the app expects it.
+export { cleanForSpeech };
 
 const cleanMarkdown = (s) => cleanForSpeech(s.replace(/^\s*(?:[-*+•]|\d+[.)])\s+/gm, '').replace(/^\s*>+\s*/gm, '').replace(/\[([^\]]+)]\([^)]*\)/g, '$1'));
 
@@ -215,15 +276,15 @@ export class Narrator extends EventTarget {
       if (i + 1 < this.sents.length) this.enqueue(i + 1, gen); else this.finish(gen);
       return;
     }
-    const lang = this.unitLang(text);
-    const u = new SpeechSynthesisUtterance(text);
-    const voice = attempt > 0 ? null : pickVoice(lang, s.voiceURI?.[lang]);
-    if (voice) { u.voice = voice; u.lang = voice.lang; } else u.lang = lang;
-    u.rate = s.rate || 1;
-    this.live.add(u);
+    // One utterance per run of one language ("我昨天在 | Apple Store | 買了…"), spoken back to back; the unit is still ONE
+    // position: it starts when its first part starts and ends when its last part ends. A retry speaks it plainly, as one part.
+    const parts = attempt > 0 ? [{ text, lang: this.unitLang(text) }] : speechParts(this.sents[i], { lang: this.lang, settings: s, fallback: (t) => this.unitLang(t) });
+    const us = parts.map((p) => utteranceFor(p, { uri: (l) => s.voiceURI?.[l], rate: s.rate || 1, plainVoice: attempt > 0 }));
+    const first = us[0], last = us[us.length - 1];
+    for (const u of us) this.live.add(u);
     const ms = (n) => 5000 + (n * 450) / (s.rate || 1);
 
-    u.onstart = () => {
+    first.onstart = () => {
       if (gen !== this.gen) return;
       clearTimeout(this.startDog);
       this.startedIdx = i;
@@ -234,14 +295,15 @@ export class Narrator extends EventTarget {
       this.watchdog = setTimeout(() => { if (gen === this.gen && this.idx === i) this.advanceAfterStall(i, gen); }, ms(text.length));
       if (this.queued === i && i + 1 < this.sents.length) this.enqueue(i + 1, gen);
     };
-    u.onend = () => {
-      this.live.delete(u);
+    for (const u of us) u.onend = () => { this.live.delete(u); };
+    last.onend = () => {
+      this.live.delete(last);
       if (gen !== this.gen) return;
       clearTimeout(this.watchdog);
       if (i >= this.sents.length - 1) this.finish(gen);
       else if (this.queued === i) this.enqueue(i + 1, gen);
     };
-    u.onerror = (e) => {
+    const onError = (u) => (e) => {
       this.live.delete(u);
       if (gen !== this.gen) return;
       if (e.error === 'canceled' || e.error === 'interrupted') return;
@@ -251,9 +313,10 @@ export class Narrator extends EventTarget {
       if (this.errors >= 4) { this.hardStop(); this.emit('state'); this.emit('error', e.error); return; }
       this.queued = i; this.enqueue(i + 1, gen);
     };
+    for (const u of us) u.onerror = onError(u); // a part that fails restarts the whole unit, plainly (attempt 1)
 
     this.queued = i;
-    synth.speak(u);
+    for (const u of us) synth.speak(u);
     clearTimeout(this.startDog);
     this.startDog = setTimeout(() => { // the engine accepted the utterance but never started it
       if (gen !== this.gen || this.startedIdx >= i || synth.speaking) return;
@@ -276,14 +339,16 @@ export class Narrator extends EventTarget {
     this.emit('end');
   }
 
-  unitLang(text) {
-    // A Chinese/Japanese book quoting a whole English sentence should not be read with a Chinese voice.
-    if (/^(zh|ja|ko)/.test(this.lang)) {
-      const d = detectSpokenLang(text, this.lang);
-      return /^(zh|ja|ko)/.test(d) ? this.lang : d;
-    }
-    return this.lang;
+  unitLang(text) { return unitLang(this.lang, text); }
+}
+
+/** The language a speech unit is read in: the book's, unless a Chinese/Japanese/Korean book quotes a whole sentence in another language. */
+export function unitLang(bookLang, text) {
+  if (/^(zh|ja|ko)/.test(bookLang)) {
+    const d = detectSpokenLang(text, bookLang);
+    return /^(zh|ja|ko)/.test(d) ? bookLang : d;
   }
+  return bookLang;
 }
 
 // ---------------------------------------------------------------- spoken answers
@@ -318,15 +383,18 @@ export class AnswerSpeaker {
 
   push(text) {
     if (this.finished || !ttsSupported()) return;
-    const clean = cleanForSpeech(text);
-    if (!/[\p{L}\p{N}]/u.test(clean)) return;
+    if (!speakable(cleanForSpeech(text))) return;
     const s = this.getSettings();
-    const lang = detectSpokenLang(clean, this.getFallbackLang());
-    const u = new SpeechSynthesisUtterance(clean);
-    const voice = pickVoice(lang, s.answerVoiceURI?.[lang] || s.voiceURI?.[lang]);
-    if (voice) { u.voice = voice; u.lang = voice.lang; } else u.lang = lang;
-    u.rate = Math.min(2, (s.rate || 1) * 1.02);
-    u.pitch = s.answerPitch || 1;
+    // The answer is in the language of the question (that is what the AI is told to use), which is not necessarily the book's
+    // or the interface's: so that is the language the voices are planned around. Words in other scripts get their own voice.
+    const lang = this.getFallbackLang();
+    const parts = speechParts(text, { lang, settings: s, fallback: (t) => detectSpokenLang(t, lang) });
+    for (const part of parts) this.pushPart(part, s);
+  }
+
+  pushPart(part, s) {
+    const clean = part.text;
+    const u = utteranceFor(part, { uri: (l) => s.answerVoiceURI?.[l] || s.voiceURI?.[l], rate: Math.min(2, (s.rate || 1) * 1.02), pitch: s.answerPitch || 1 });
     const gen = this.gen;
     const rec = { u, len: clean.length, rate: u.rate, started: false, settled: false, endTimer: null };
     const settle = () => {

@@ -3,7 +3,7 @@
 //    (helps against tab freezing and unlocks lock-screen / headset controls via Media Session)
 //  • Screen Wake Lock keeps the display on while listening (speech synthesis stops in most mobile
 //    browsers once the screen locks)
-function silentWavUrl() {
+export function silentWavUrl() {
   const rate = 8000, n = rate; // 1 second
   const buf = new ArrayBuffer(44 + n);
   const v = new DataView(buf);

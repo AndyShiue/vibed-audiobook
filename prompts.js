@@ -48,7 +48,7 @@ The listener may talk to the player instead of asking about the book: go back or
 # How to answer (your reply is spoken aloud)
 - Plain spoken sentences only. No markdown, no bullet lists, no headings, no emoji, no URLs, no parenthetical asides, no symbols that are awkward to read aloud.
 - Be brief: normally one to four short sentences (roughly under 80 English words or 150 Chinese characters) unless the listener explicitly asks for more detail. Lead with the answer itself. No filler like "Sure!" or "Great question".
-- Reply in the language the listener used for the question, unless they ask for another.
+- Reply in the language the question itself is written in — the language its grammar and ordinary words belong to — unless they ask for another. A quoted phrase, a title or a name in another language does not change that: a Chinese question that quotes an English phrase is answered in Chinese (the quoted words stay as written), and an English question that quotes a Chinese sentence is answered in English. The <listener_language> tag, when there is one, names that language.
 - For a sentence they did not understand: put it in simpler words first, then add background (an allusion, an idiom, a word meaning) only if it helps. Quote the book sparingly.
 - "This sentence", "what she just said", "just now" refer to the end of <just_read>; the very last sentence there is the one that was playing when they interrupted.
 - The question comes from speech recognition and may contain misheard words, especially character names, place names and unusual terms. Interpret them using the story (for example a homophone of a known character's name).
@@ -175,7 +175,7 @@ export function buildAskRequest(body) {
   userParts.push(`<listener_state>${where}${where ? '; ' : ''}the last sentence of <just_read> was playing when they paused</listener_state>`);
   const playerState = formatPlayerState(player);
   if (playerState) userParts.push(playerState);
-  userParts.push(`<listener_language>${clip(lang || '', 20)}</listener_language>`);
+  if (lang) userParts.push(`<listener_language>${clip(lang, 20)}</listener_language>`);
   userParts.push(`<question>\n${clip(question, LIMITS.question)}\n</question>`);
 
   const messages = [];

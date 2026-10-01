@@ -90,7 +90,7 @@ button.titles .book-title, button.titles .chapter-line { display: block; width: 
 @keyframes ring { 0% { opacity: .55; transform: translate(-50%, -50%) scale(.6); } 100% { opacity: 0; transform: translate(-50%, -50%) scale(3.2); } }
 @keyframes breathe { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(.88); opacity: .7; } }
 
-.caption { flex: none; height: min(9.6em, 21dvh); min-height: 4.6em; margin: 0; padding: 2px 4px; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; display: flex; flex-direction: column; border-radius: 14px; color: var(--dim); font-size: .98rem; line-height: 1.6; scrollbar-width: thin; scrollbar-color: var(--line) transparent; }
+.caption { flex: none; height: min(9.6em, 21dvh); min-height: 4.6em; margin: 0; padding: 2px 4px; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; display: flex; flex-direction: column; border-radius: 14px; color: var(--dim); font-size: .98rem; line-height: 1.6; scrollbar-width: thin; scrollbar-color: var(--line) transparent; }
 .caption p { margin: auto 0; padding: 4px 6px; text-align: center; white-space: pre-wrap; overflow-wrap: anywhere; }
 .caption p.long { text-align: start; }
 .caption.bright { color: var(--text); }
@@ -112,7 +112,7 @@ button.titles .book-title, button.titles .chapter-line { display: block; width: 
 .chip.on { border-color: var(--accent); color: #cfdbff; }
 
 /* ---------- library ---------- */
-.library-body { flex: 1; overflow-y: auto; padding: 4px 2px 24px; }
+.library-body { flex: 1; overflow-y: auto; overflow-x: hidden; touch-action: pan-y pinch-zoom; padding: 4px 2px 24px; }
 .add-row { display: flex; gap: 10px; margin: 6px 0 10px; }
 .btn { height: 50px; padding: 0 20px; border-radius: 14px; border: 1px solid var(--line); background: var(--card); display: inline-flex; align-items: center; justify-content: center; font-weight: 600; }
 .btn.primary { background: linear-gradient(160deg, var(--accent), var(--accent-2)); border: 0; color: #fff; flex: 1; }
@@ -145,12 +145,12 @@ button.titles .book-title, button.titles .chapter-line { display: block; width: 
 .qa-item .meta { margin: .5em 0 0; color: var(--dim); font-size: .8rem; }
 .qa-empty { color: var(--dim); text-align: center; padding: 40px 0; }
 .sheet .close { font-size: 1.1rem; }
-.text-body { overflow-y: auto; padding: 4px 2px 12px; line-height: 1.85; font-size: 1.05rem; }
+.text-body { overflow-y: auto; overflow-x: hidden; touch-action: pan-y pinch-zoom; padding: 4px 2px 12px; line-height: 1.85; font-size: 1.05rem; }
 .text-body p { margin: 0 0 1em; }
 .text-body span { border-radius: 4px; padding: 1px 0; cursor: pointer; }
 .text-body span.now { background: #6c8cff44; box-shadow: 0 0 0 2px #6c8cff44; }
 .text-body span.past { color: var(--dim); }
-.chapter-list { list-style: none; margin: 0; padding: 0; overflow-y: auto; }
+.chapter-list { list-style: none; margin: 0; padding: 0; overflow-y: auto; overflow-x: hidden; touch-action: pan-y pinch-zoom; }
 .chapter-list li button { width: 100%; text-align: left; border: 0; background: none; padding: 14px 6px; border-bottom: 1px solid var(--line); font-size: 1rem; display: flex; gap: 12px; align-items: baseline; justify-content: space-between; }
 .chapter-list li button .pct { flex: none; color: var(--dim); font-size: .8rem; font-variant-numeric: tabular-nums; }
 .chapter-list li.current button .pct { color: var(--accent); }
@@ -158,14 +158,23 @@ button.titles .book-title, button.titles .chapter-line { display: block; width: 
 .ask-form { display: grid; gap: 10px; padding-bottom: 6px; }
 .ask-form textarea, .ask-form input, .settings select, .settings input[type=password] { width: 100%; background: var(--bg); border: 1px solid var(--line); border-radius: 12px; padding: 12px; }
 
-.settings { overflow-y: auto; display: grid; gap: 14px; padding-bottom: 10px; }
+/* The settings list scrolls up and down only. (A grid that scrolls vertically scrolls sideways too as soon as anything inside is a
+   pixel too wide — a range slider's default 2px margin was enough — so: no sideways scrolling or panning at all, and nothing inside
+   may widen its column.) */
+.settings { overflow-y: auto; overflow-x: hidden; overscroll-behavior-x: none; touch-action: pan-y pinch-zoom; display: grid; gap: 14px; padding-bottom: 10px; }
+.settings > * { min-width: 0; }
 .row { display: grid; gap: 6px; font-size: .95rem; }
 .section-title { margin-top: 6px; padding-top: 12px; border-top: 1px solid var(--line); font-weight: 650; color: var(--accent); font-size: .9rem; letter-spacing: .04em; }
 .row.check { display: flex; gap: 10px; align-items: flex-start; }
 .row.check input { width: 22px; height: 22px; margin-top: 2px; flex: none; }
 .row.buttons { display: flex; flex-wrap: wrap; gap: 8px; }
-.row.info { color: var(--dim); font-size: .82rem; line-height: 1.6; }
-.settings input[type=range] { width: 100%; }
+.row.info { color: var(--dim); font-size: .82rem; line-height: 1.6; overflow-wrap: anywhere; }
+/* the live meter under "shake the phone": the bar is the strongest recent movement, the tick is what a shake takes */
+.shake-bar { position: relative; height: 10px; border-radius: 5px; background: var(--line); overflow: hidden; }
+.shake-bar span { position: absolute; inset: 0 auto 0 0; width: 0; background: var(--accent); }
+.shake-bar span.hit { background: var(--answer); }
+.shake-bar i { position: absolute; top: 0; bottom: 0; left: 66.6%; width: 2px; background: var(--text, #fff); opacity: .7; }
+.settings input[type=range] { width: 100%; margin: 0; } /* (browsers give a range input a 2px margin of its own, which with width 100% sticks out) */
 
 /* ---------- toasts / overlay ---------- */
 #toasts { position: fixed; top: calc(8px + var(--safe-t)); left: 12px; right: 12px; z-index: 40; display: grid; gap: 8px; pointer-events: none; }

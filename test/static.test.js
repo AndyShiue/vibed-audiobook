@@ -39,3 +39,17 @@ test('vendored libraries are present', () => {
     assert.ok(fs.existsSync(path.join(PUBLIC, 'vendor', f)), `public/vendor/${f} missing — run "npm install"`);
   }
 });
+
+test('no list in the app can scroll sideways: every vertical scroller says so, and the settings list has nothing that sticks out', () => {
+  const css = fs.readFileSync(path.join(PUBLIC, 'css', 'app.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+  const rules = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].map((m) => ({ selector: m[1].trim(), body: m[2] }));
+  // a box that scrolls up and down scrolls sideways too (overflow-x becomes "auto") as soon as anything inside is a pixel too wide
+  for (const r of rules.filter((x) => /overflow-y:\s*auto/.test(x.body))) assert.match(r.body, /overflow-x:\s*hidden/, `${r.selector} scrolls vertically but may also scroll sideways`);
+  const settings = rules.find((r) => r.selector === '.settings');
+  assert.match(settings.body, /overflow-x:\s*hidden/);
+  assert.match(settings.body, /touch-action:\s*pan-y pinch-zoom/, 'no sideways panning, but pinch-zoom stays');
+  assert.ok(rules.some((r) => r.selector === '.settings > *' && /min-width:\s*0/.test(r.body)), 'a long word must not widen the column');
+  // browsers put a 2px margin around a range input of their own; at width 100% that alone pushed the settings list 2px sideways
+  const range = rules.find((r) => r.selector.startsWith('.settings input[type=range]'));
+  assert.match(range.body, /width:\s*100%/); assert.match(range.body, /margin:\s*0\b/);
+});

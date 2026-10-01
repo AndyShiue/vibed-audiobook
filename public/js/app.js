@@ -5,10 +5,12 @@ import * as ai from './ai.js';
 import { Book, buildBookData, resegmentBook } from './book.js';
 import { SEG_VERSION } from './segmenter.js';
 import { parseBookFile, parsePastedText, ACCEPT } from './parsers/index.js';
-import { Narrator, AnswerSpeaker, SentenceStream, loadVoices, voicesFor, pickVoice, ttsSupported, cleanForSpeech } from './tts.js';
+import { Narrator, AnswerSpeaker, SentenceStream, loadVoices, voicesFor, pickVoice, ttsSupported, cleanForSpeech, speakMixed, speakOnDevice, mixedMode } from './tts.js';
+import { AudioOut, AudioNarrator, AudioAnswerSpeaker } from './audio-voice.js';
+import { VoiceEngine, NarratorHub, AnswerHub } from './voice-hub.js';
 import { Listener, sttSupported } from './stt.js';
 import { VoiceRecorder, recorderSupported } from './recorder.js';
-import { ShakeListener } from './shake.js';
+import { ShakeListener, thresholdFromSlider, sliderFromThreshold, formatThreshold } from './shake.js';
 import { Feedback } from './feedback.js';
 import { Session } from './session.js';
 import { MemoryTree, MemoryBuilder } from './memory.js';
@@ -47,8 +49,18 @@ const S = {
 };
 
 const getSettings = () => S.settings;
-const narrator = new Narrator(getSettings);
-const answerer = new AnswerSpeaker(getSettings, () => S.questionLang || askLang());
+// Two voice engines — the phone's own (default) and the server's, played as audio — behind one narrator and one answer speaker.
+// The server's is used when the listener chose it in Settings and the server has it; if it fails the phone's voices take over.
+const serverVoicesUsable = () => Boolean(S.config.tts?.available) && !S.config.offline;
+const engine = new VoiceEngine(() => S.settings.engine === 'server' && serverVoicesUsable());
+const audioOut = new AudioOut();
+const answerLang = () => S.questionLang || askLang();
+const narrator = new NarratorHub(new Narrator(getSettings), new AudioNarrator(getSettings, { out: audioOut }), engine);
+const answerer = new AnswerHub(
+  new AnswerSpeaker(getSettings, answerLang),
+  new AudioAnswerSpeaker(getSettings, answerLang, { out: audioOut, speakDevice: speakOnDevice, onFail: (err) => engine.fail(err?.message || '') }),
+  engine,
+);
 const listener = new Listener();
 const feedback = new Feedback(getSettings);
 const recorder = new VoiceRecorder(() => feedback.ctx);
@@ -97,7 +109,8 @@ function fmtDuration(sec) {
 }
 
 let speechUnlocked = false;
-function unlockSpeech() { // iOS only lets speechSynthesis start from a user gesture; prime it once
+function unlockSpeech() { // iOS only lets speechSynthesis (and a fresh <audio> element) start from a user gesture; prime them once
+  if (engine.kind === 'server') audioOut.unlock();
   if (speechUnlocked || !ttsSupported()) return;
   speechUnlocked = true;
   try { const u = new SpeechSynthesisUtterance(' '); u.volume = 0; speechSynthesis.speak(u); } catch { /* ignore */ }
@@ -219,7 +232,7 @@ function renderChips() {
 function renderBanner() {
   const el = $('banner');
   let msg = '', kind = '';
-  if (!ttsSupported()) msg = t('banner.noTts');
+  if (!ttsSupported() && engine.kind !== 'server') msg = t('banner.noTts');
   else if (S.config.offline) { msg = t('banner.offline'); kind = 'info'; }
   else if (!S.config.ai) msg = t('banner.noAi');
   else if (S.config.needsToken && !S.settings.accessToken) msg = t('banner.needToken');
@@ -358,6 +371,11 @@ narrator.addEventListener('end', () => {
   toast(t('book.finished'));
   renderPlay();
 });
+engine.addEventListener('fallback', (e) => {
+  toast(t('toast.engineFallback', { detail: e.detail || '?' }), 'error', 9000);
+  renderBanner();
+  if (openSheetId === 'settingsSheet') renderVoiceRows();
+});
 narrator.addEventListener('blocked', () => { toast(t('toast.blocked')); session.release(); });
 narrator.addEventListener('error', (e) => { toast(t('toast.ttsError', { detail: e.detail }), 'error', 8000); session.release(); });
 
@@ -472,7 +490,9 @@ async function onAskPress() {
   feedback.unlock(); unlockSpeech();
   if (!S.book) { openLibrary(); return; }
   switch (S.mode) {
-    case 'listening': listener.stop(); recorder.stop(); return;        // "I'm done talking"
+    case 'listening':                                                  // "I'm done talking" — or, when nothing has been said yet, "never mind"
+      if (recorder.heard || S.interim.trim()) { listener.stop(); recorder.stop(); } else stopAsking();
+      return;
     case 'thinking': cancelAsk({ resume: true }); return;              // changed my mind
     case 'answering': interruptAnswer(); return;                       // follow-up question
     default: beginAsk();
@@ -578,6 +598,7 @@ async function submitQuestion(text, seq, { quiet = false } = {}) {
   text = text.trim();
   if (!text) { finishAsk(seq); return; }
   S.interim = text;
+  if (!S.questionLang) S.questionLang = detectSpokenLang(text, askLang()); // typed or phone-recognized: the cloud path has set it already
   S.thinkingNote = t('ask.think.label');
   if (quiet) { renderAsk(); } // already waiting (cues and ticks are running) after cloud recognition
   else { setMode('thinking'); feedback.cue('sent'); startTicks(seq); }
@@ -743,7 +764,19 @@ async function finishAsk(seq, resume = true) {
   }
 }
 
-/** Tap while the AI is talking: stop it and listen for a follow-up question. */
+/**
+ * Back to "tap to ask", whatever the ask flow was doing: the AI stops mid-answer, a recording nothing was said into is dropped. Like
+ * the end of an answer, the book carries on only if it was playing when the question was asked.
+ */
+function stopAsking() {
+  const seq = ++S.askSeq;
+  S.askAbort?.abort(); S.askAbort = null;
+  listener.abort(); recorder.abort(); answerer.cancel(); stopTicks();
+  feedback.cue('cancel');
+  finishAsk(seq);
+}
+
+/** Tap while the AI is talking: stop it and listen for a follow-up question (tap again before saying anything: back to "tap to ask"). */
 function interruptAnswer() {
   const seq = ++S.askSeq;
   S.askAbort?.abort(); S.askAbort = null;
@@ -962,6 +995,68 @@ function fillVoiceSelect(sel, lang, chosen) {
   sel.value = chosen || '';
 }
 
+/** The server's voices for a language (it knows many more than a phone does); the list comes from the server and may take a moment. */
+async function fillServerVoiceSelect(sel, lang, chosen) {
+  const seq = (sel.dataset.seq = String(Number(sel.dataset.seq || 0) + 1));
+  sel.innerHTML = '';
+  sel.add(new Option(t('voice.auto'), ''));
+  sel.value = '';
+  try {
+    const { voices } = await ai.ttsVoices(lang);
+    if (sel.dataset.seq !== seq) return; // another language was asked for meanwhile
+    for (const v of voices) {
+      const gender = v.gender === 'female' ? t('voice.gender.female') : v.gender === 'male' ? t('voice.gender.male') : '';
+      const bits = [v.lang, gender, v.multilingual && v.lang && t('voice.multilingual')].filter(Boolean);
+      sel.add(new Option(`${v.name} (${bits.join(', ')})`, v.id));
+    }
+    sel.value = chosen || '';
+    if (sel.value !== (chosen || '')) sel.value = '';
+  } catch {
+    if (sel.dataset.seq !== seq) return;
+    const note = new Option(t('voice.listError'), '');
+    note.disabled = true;
+    sel.add(note);
+  }
+}
+
+/** Which engine's voices the voice pickers in Settings are about: the server's when that is chosen and the server has them. */
+const serverVoicesChosen = () => S.settings.engine === 'server' && Boolean(S.config.tts?.available);
+
+/** The "voice engine" choice, its explanation, and the rows that depend on it (the phone's voices, or the server's). */
+function renderVoiceRows() {
+  const s = S.settings, tts = S.config.tts;
+  const bookLang = S.book?.lang || normalizeTag(navigator.language) || 'zh-TW';
+  const server = serverVoicesChosen();
+
+  $('setEngine').value = s.engine === 'server' ? 'server' : 'device';
+  $('setEngine').querySelector('option[value="server"]').disabled = !serverVoicesUsable();
+  let info = '';
+  if (s.engine === 'server') {
+    if (!tts?.available) info = t('engine.info.unavailable', { reason: tts?.reason || '' });
+    else if (S.config.offline) info = t('engine.info.offline');
+    else if (engine.failed) info = t('engine.info.failed');
+    else info = t('engine.info.server', { provider: tts.label }) + (tts.official ? '' : ` ${t('engine.info.unofficial')}`);
+  } else {
+    info = t('engine.info.device') + (tts?.available ? '' : ` ${t('engine.info.notSetUp')}`);
+  }
+  $('engineInfo').textContent = info;
+
+  // the voice for the English words in the text (an English book's own voice is the one above); either engine splits mixed text by language
+  const notEnglish = !/^en/i.test(bookLang);
+  $('rowVoiceAlt').hidden = !notEnglish;
+  if (server) {
+    fillServerVoiceSelect($('setVoice'), bookLang, s.serverVoice[bookLang]);
+    fillServerVoiceSelect($('setAnswerVoice'), askLang(), s.serverAnswerVoice[askLang()]);
+    if (notEnglish) fillServerVoiceSelect($('setVoiceAlt'), 'en-US', s.serverVoice['en-US']);
+  } else {
+    fillVoiceSelect($('setVoice'), bookLang, s.voiceURI[bookLang]);
+    fillVoiceSelect($('setAnswerVoice'), askLang(), s.answerVoiceURI[askLang()]);
+    fillVoiceSelect($('setVoiceAlt'), 'en-US', s.voiceURI['en-US']);
+  }
+  // a phone without an English voice cannot read the English words of a Chinese or Japanese text in English: say so
+  $('voiceHint').hidden = server || !notEnglish || !ttsSupported() || voicesFor('en-US').length > 0;
+}
+
 function renderMemInfo() {
   const el = $('memInfo');
   if (!S.builder) { el.textContent = ''; return; }
@@ -976,13 +1071,27 @@ function renderMemInfo() {
 
 const shakeText = (status) => ({
   ok: t('shake.ok'), waiting: t('shake.waiting'), none: t('shake.none'), denied: t('shake.denied'),
-  unsupported: t('shake.unsupported'), 'needs-permission': t('shake.needsPermission'),
+  unsupported: t('shake.unsupported'), 'needs-permission': t('shake.needsPermission'), insecure: t('shake.insecure'), 'load-failed': t('shake.loadFailed'),
 })[status] || '';
+
+/** The live meter under the shake setting: whether the phone sends motion data at all, and how hard the latest shake was against what it takes. */
+function renderShakeMeter() {
+  const box = $('shakeMeter');
+  if (!box) return;
+  const show = openSheetId === 'settingsSheet' && S.settings.shake && !['unsupported', 'denied', 'insecure', 'needs-permission', 'load-failed', ''].includes(S.shakeStatus);
+  box.hidden = !show;
+  if (!show) return;
+  const st = shake.stats();
+  $('shakeBar').style.width = `${Math.min(100, (st.peak / st.need) * (100 / 1.5))}%`;
+  $('shakeBar').classList.toggle('hit', st.peak >= st.need);
+  $('shakeMeterText').textContent = t('shake.meter', { hz: st.hz, peak: st.peak.toFixed(1), need: st.need.toFixed(1) });
+}
 
 function renderShakeInfo() {
   const row = $('shakeSensRow'), info = $('shakeInfo');
   if (!row || !info) return;
   row.hidden = !S.settings.shake;
+  $('shakeSensHint').hidden = !S.settings.shake;
   info.hidden = !S.settings.shake;
   if (!S.settings.shake) return;
   const seen = Date.now() - S.shakeSeenAt < 2500;
@@ -990,7 +1099,12 @@ function renderShakeInfo() {
   info.style.color = seen ? 'var(--answer)' : '';
 }
 
-/** Shake = tap on the big button. Inside the settings sheet it only gives feedback so the sensitivity can be tried out. */
+/**
+ * Shake: start asking, like a tap on the big button — but while the AI is answering a shake means "stop": the answer ends and the
+ * app is back at "tap to ask" (a tap then would instead stop it and listen for a follow-up). Not while listening or thinking: a
+ * phone moves in the hand while its owner talks, and a stray shake must not end the question.
+ * Inside the settings sheet it only gives feedback so the sensitivity can be tried out.
+ */
 function onShake() {
   if (!S.settings.shake || document.visibilityState !== 'visible') return;
   if (openSheetId === 'settingsSheet') {
@@ -998,10 +1112,11 @@ function onShake() {
     setTimeout(renderShakeInfo, 2600);
     return;
   }
-  if (openSheetId || !S.book || $('player').hidden || S.mode !== 'idle') return;
+  if (openSheetId || !S.book || $('player').hidden || !['idle', 'answering'].includes(S.mode)) return;
   feedback.vibrate([30, 40, 30]);
-  announce(t('shake.announce'));
   feedback.unlock(); unlockSpeech();
+  if (S.mode === 'answering') { announce(t('shake.interrupted')); stopAsking(); return; }
+  announce(t('shake.announce'));
   beginAsk();
 }
 
@@ -1009,7 +1124,7 @@ function onShake() {
 async function applyShake(askPermission = false) {
   shake.stop();
   if (!S.settings.shake) { S.shakeStatus = ''; renderShakeInfo(); renderAsk(); return 'off'; }
-  const result = await shake.start({ sensitivity: S.settings.shakeSens, askPermission });
+  const result = await shake.start({ threshold: S.settings.shakeThreshold, askPermission });
   renderAsk();
   return result;
 }
@@ -1029,11 +1144,11 @@ function openSettings() {
   const s = S.settings;
   $('setUiLang').value = isLang(s.uiLang) ? s.uiLang : LANG_AUTO;
   $('setRate').value = s.rate; $('rateVal').textContent = `${s.rate.toFixed(2).replace(/0$/, '')}×`;
-  const bookLang = S.book?.lang || normalizeTag(navigator.language) || 'zh-TW';
-  fillVoiceSelect($('setVoice'), bookLang, s.voiceURI[bookLang]);
-  fillVoiceSelect($('setAnswerVoice'), askLang(), s.answerVoiceURI[askLang()]);
+  renderVoiceRows();
+  $('setMixed').value = mixedMode(s);
   $('setAskLang').value = s.askLang;
-  $('setShake').checked = s.shake; $('setShakeSens').value = s.shakeSens; renderShakeInfo();
+  $('setShake').checked = s.shake; renderShakeInfo();
+  $('setShakeSens').value = sliderFromThreshold(s.shakeThreshold); $('shakeSensVal').textContent = formatThreshold(s.shakeThreshold);
   $('setSttMode').value = s.sttMode; $('setCloudLang').value = s.cloudLang; $('setSttHint').checked = s.sttHint;
   renderSttInfo();
   $('setWake').checked = s.wakeLock; $('setEarcons').checked = s.earcons; $('setHaptics').checked = s.haptics; $('setTitle').checked = s.sendTitle;
@@ -1062,7 +1177,17 @@ function changeUiLang() {
   else if (openSheetId === 'textSheet') showTextTab($('tabQA').classList.contains('on') ? 'qa' : 'text');
 }
 
+/** A sample in the server's voice (the voice id is what the picker holds when the server voices are chosen). */
+async function previewServer(text, lang, voice, extra = {}) {
+  audioOut.unlock();
+  try {
+    const url = URL.createObjectURL(await ai.ttsClip({ text, lang, voice, ...extra }));
+    try { await audioOut.play(url, { rate: S.settings.rate || 1 }); } finally { URL.revokeObjectURL(url); }
+  } catch (err) { toast(t('toast.ttsError', { detail: err.message }), 'error', 6000); }
+}
+
 function speakPreview(text, lang, uri, pitch = 1) {
+  if (serverVoicesChosen()) { previewServer(text, lang, uri); return; }
   if (!ttsSupported()) return;
   speechSynthesis.cancel();
   const u = new SpeechSynthesisUtterance(text);
@@ -1077,12 +1202,20 @@ function bindSettings() {
   const save = () => lib.saveSettings(s);
   $('setRate').addEventListener('input', (e) => { $('rateVal').textContent = `${Number(e.target.value).toFixed(2).replace(/0$/, '')}×`; });
   $('setRate').addEventListener('change', (e) => setRate(Number(e.target.value)));
+  $('setEngine').addEventListener('change', (e) => {
+    s.engine = e.target.value === 'server' ? 'server' : 'device'; save();
+    engine.retry(); // choosing the engine again is how a failed server is tried again
+    narrator.refresh();
+    renderVoiceRows(); renderBanner();
+  });
   $('setVoice').addEventListener('change', (e) => {
     const lang = S.book?.lang || normalizeTag(navigator.language) || 'zh-TW';
-    s.voiceURI[lang] = e.target.value; save();
+    (serverVoicesChosen() ? s.serverVoice : s.voiceURI)[lang] = e.target.value; save();
     if (narrator.playing) narrator.play(narrator.idx);
   });
-  $('setAnswerVoice').addEventListener('change', (e) => { s.answerVoiceURI[askLang()] = e.target.value; save(); });
+  $('setAnswerVoice').addEventListener('change', (e) => { (serverVoicesChosen() ? s.serverAnswerVoice : s.answerVoiceURI)[askLang()] = e.target.value; save(); });
+  $('setVoiceAlt').addEventListener('change', (e) => { (serverVoicesChosen() ? s.serverVoice : s.voiceURI)['en-US'] = e.target.value; save(); if (narrator.playing) narrator.play(narrator.idx); });
+  $('setMixed').addEventListener('change', (e) => { s.mixedVoice = e.target.value; save(); if (narrator.playing) narrator.play(narrator.idx); });
   $('setAskLang').addEventListener('change', (e) => { s.askLang = e.target.value; save(); openSettings(); });
   $('setUiLang').addEventListener('change', (e) => { s.uiLang = e.target.value; save(); changeUiLang(); });
   $('setShake').addEventListener('change', async (e) => {
@@ -1091,7 +1224,9 @@ function bindSettings() {
     if (s.shake && result === 'denied') { s.shake = false; e.target.checked = false; save(); await applyShake(); toast(t('shake.deniedToast'), 'error', 7000); }
     renderShakeInfo();
   });
-  $('setShakeSens').addEventListener('change', (e) => { s.shakeSens = e.target.value; save(); shake.setSensitivity(s.shakeSens); });
+  // dragging the slider takes effect at once, so the live meter under it shows what the new number asks for; it is kept when let go
+  $('setShakeSens').addEventListener('input', (e) => { const v = thresholdFromSlider(e.target.value); $('shakeSensVal').textContent = formatThreshold(v); shake.setThreshold(v); });
+  $('setShakeSens').addEventListener('change', (e) => { s.shakeThreshold = thresholdFromSlider(e.target.value); save(); shake.setThreshold(s.shakeThreshold); });
   $('setSttMode').addEventListener('change', (e) => { s.sttMode = e.target.value; save(); renderSttInfo(); renderAsk(); });
   $('setCloudLang').addEventListener('change', (e) => { s.cloudLang = e.target.value; save(); });
   $('setSttHint').addEventListener('change', (e) => { s.sttHint = e.target.checked; save(); });
@@ -1106,6 +1241,12 @@ function bindSettings() {
   $('btnTestAnswer').addEventListener('click', () => {
     const lang = askLang();
     speakPreview(t(`preview.answer.${previewLang(lang)}`), lang, $('setAnswerVoice').value, s.answerPitch);
+  });
+  $('btnTestMixed').addEventListener('click', () => {
+    const lang = S.book?.lang || normalizeTag(navigator.language) || 'zh-TW';
+    const sample = t(`preview.mixed.${previewLang(lang)}`);
+    if (serverVoicesChosen()) previewServer(sample, lang, '', { voices: s.serverVoice, mixed: mixedMode(s) });
+    else speakMixed(sample, { lang, settings: s });
   });
   $('btnChapters').addEventListener('click', () => { openSheet('chapterSheet'); renderChapterSheet(); });
   $('btnClearMemory').addEventListener('click', async () => {
@@ -1216,6 +1357,7 @@ function bindUI() {
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') { saveProgressNow(); saveMemoryNow(); } });
   window.addEventListener('pagehide', () => { saveProgressNow(); saveMemoryNow(); });
   setInterval(() => { if (S.sleep.mode > 0) renderChips(); }, 20000);
+  setInterval(renderShakeMeter, 200);
 
   bindSettings();
 }
